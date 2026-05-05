@@ -3,10 +3,10 @@
 ## Product thesis
 
 `gazelle_fold` should be understood first as a bottom-up fold over the BUILD
-tree, not as a generic policy engine. Package callbacks run as Gazelle visits
+tree, not as a generic policy engine. Fold callbacks run as Gazelle visits
 packages, may export state upward, and can synthesize parent-facing targets from
-child exports. Rule callbacks are the local companion: they can modify or
-validate the targets in the package currently being visited.
+child exports. Rewrites and policies are the local companions: rewrites modify
+targets in the package currently being visited, while policies validate them.
 
 That seam is especially valuable in large monorepos, and more so when AI agents
 are authoring BUILD files alongside humans. Repo owners can encode local naming,
@@ -18,10 +18,12 @@ pull machine-authored edits back toward the project's own patterns.
 The public surface should have four layers:
 
 ```text
-BUILD directives       activate named policies by package scope
+BUILD directives       activate named definitions by package scope
+std:folds/*            ready-made folds users can import directly
+std:rewrites/*         ready-made rewrites users can import directly
 std:policies/*         ready-made policies users can import directly
-std:lib/*              helper factories for repo-owned policy modules
-gazelle_fold host      a tiny safe runtime for custom folds and policies
+std:lib/*              helper factories for repo-owned modules
+gazelle_fold host      a tiny safe runtime for custom folds, rewrites, and policies
 ```
 
 Module paths resolve through mounts rather than Bazel labels:
@@ -44,7 +46,7 @@ language. Aspect Gazelle's Orion model showed the better seam: real modules,
 
 We keep that seam, but make the product much smaller:
 
-- stock policies are importable directly
+- stock definitions are importable directly
 - helper modules are explicit and always loadable
 - user-authored modules are normal mounted files
 - the Go host owns the unsafe BUILD/Gazelle machinery
@@ -54,36 +56,36 @@ We keep that seam, but make the product much smaller:
 ## Golden path
 
 ```python
-# gazelle:policy import("std:policies/file_rollup.star")
-# gazelle:policy import("std:policies/required_tags.star")
-# gazelle:policy use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
-# gazelle:policy use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
+# gazelle:fold import("std:folds/file_rollup.star")
+# gazelle:fold import("std:rewrites/required_tags.star")
+# gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:fold use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
 ```
 
 An activation nearer the target package layers over farther activations, so a
 child can override one field without repeating the entire contract:
 
 ```python
-# gazelle:policy use("required_tags", scope = ".", tags = ["team:child"])
+# gazelle:fold use("required_tags", scope = ".", tags = ["team:child"])
 ```
 
 ## Bundled modules
 
-### Importable stock policies
+### Importable stock definitions
 
 ```text
-std:policies/file_rollup.star
-std:policies/required_tags.star
+std:folds/file_rollup.star
+std:rewrites/required_tags.star
 std:policies/forbidden_deps.star
 ```
 
-These register generic policy names driven entirely by `use(...)` params.
+These register generic definition names driven entirely by `use(...)` params.
 
 ### Loadable helper library
 
 ```python
-load("std:lib/required_tags.star", "required_tags_policy")
-load("std:lib/file_rollup.star", "file_rollup_policy")
+load("std:lib/required_tags.star", "required_tags_rewrite")
+load("std:lib/file_rollup.star", "file_rollup_fold")
 load("std:lib/forbidden_deps.star", "forbidden_deps_policy")
 ```
 
@@ -91,12 +93,12 @@ These let a repo define opinionated names and defaults without vendoring helper
 code:
 
 ```python
-required_tags_policy(
+required_tags_rewrite(
     name = "rust_required_tags",
     kinds = ["rust_library", "rust_binary", "rust_test"],
 )
 
-file_rollup_policy(
+file_rollup_fold(
     name = "rust_files",
     include = ["*.rs", "BUILD.bazel"],
     local_name = "all_sources",
@@ -113,7 +115,7 @@ forbidden_deps_policy(
 Repo-owned entrypoints can be imported from the `root` mount:
 
 ```python
-# gazelle:policy import("root:build/policies/rust.star")
+# gazelle:fold import("root:build/gazelle_fold/rust.star")
 ```
 
 Inside a `.star` file, plain paths stay relative to the importing module:
@@ -127,8 +129,9 @@ load("../shared/common.star", "common")
 
 ```python
 gazelle_fold.param(type, required = False, default = None)
-gazelle_fold.rule_policy(name, params = {}, apply = fn)
-gazelle_fold.package_policy(name, params = {}, apply = fn)
+gazelle_fold.fold(name, params = {}, apply = fn)
+gazelle_fold.rewrite(name, params = {}, apply = fn)
+gazelle_fold.policy(name, params = {}, apply = fn)
 ```
 
 `params` is a schema, not a loose bag. The host rejects:
@@ -146,7 +149,7 @@ bool
 int
 ```
 
-### Rule-policy callbacks
+### Rewrite callbacks
 
 ```python
 def apply(ctx, rule):
@@ -155,9 +158,8 @@ def apply(ctx, rule):
 
 ```text
 ctx.rel
-ctx.policy_name
+ctx.name
 ctx.params
-ctx.report_violation(message)
 
 rule.kind
 rule.name
@@ -168,14 +170,23 @@ rule.deps_matching(patterns)
 ```
 
 Matching is intentionally an activation-time concern, not a registration-time
-constraint. That is what lets stock policies be imported directly and configured
+constraint. That is what lets stock definitions be imported directly and configured
 through `use(...)`.
 
-### Package-policy callbacks
+### Policy callbacks
 
-Package-policy callbacks are the fold steps. Each package can inspect local
-files, combine exports from already-visited children, generate or remove local
-targets, and export a label upward for ancestors.
+Policies receive the same `(ctx, rule)` shape as rewrites, plus the one operation
+that makes them policies:
+
+```text
+ctx.report_violation(message)
+```
+
+### Fold callbacks
+
+Fold callbacks are the tree steps. Each package can inspect local files, combine
+exports from already-visited children, generate or remove local targets, and
+export a label upward for ancestors.
 
 ```python
 def apply(ctx):
@@ -184,7 +195,7 @@ def apply(ctx):
 
 ```text
 ctx.rel
-ctx.policy_name
+ctx.name
 ctx.params
 ctx.matching_files(include)
 ctx.ensure_filegroup(name, srcs, public = False)
@@ -214,24 +225,24 @@ untouched instead of rebuilding them from partial knowledge.
 - directive parsing and scope inheritance
 - mount resolution
 - param validation and activation layering
-- anchored exemptions
+- anchored skips
 - leaf-to-root package-tree traversal and partial-walk completeness
 - safe BUILD AST mutations
 - diagnostics and provenance
 
 ### Starlark library
 
-- stock policy entrypoints
-- reusable policy families
+- stock fold, rewrite, and policy entrypoints
+- reusable definition families
 - parameter defaults and small compositions
-- later helpers such as `mirror_attr_policy(...)`
+- later helpers such as `mirror_attr_rewrite(...)`
 
 ## The current helpers
 
-### `required_tags_policy(...)`
+### `required_tags_rewrite(...)`
 
 ```python
-def required_tags_policy(name, kinds = None, tags = []):
+def required_tags_rewrite(name, kinds = None, tags = []):
     def _apply(ctx, rule):
         active_kinds = ctx.params["kinds"] if kinds == None else kinds
         if not rule.matches_kind(active_kinds):
@@ -246,14 +257,14 @@ When `kinds` is omitted, the helper declares it as a required activation param.
 When `kinds` is supplied, it becomes an opinionated helper with fewer required
 call-site arguments.
 
-### `file_rollup_policy(...)`
+### `file_rollup_fold(...)`
 
 ```python
-def file_rollup_policy(name, include = None, local_name = None, recursive_name = None):
+def file_rollup_fold(name, include = None, local_name = None, recursive_name = None):
     ...
 ```
 
-The stock policy leaves all three fields to `use(...)`. Repo-owned helper calls
+The stock fold leaves all three fields to `use(...)`. Repo-owned helper calls
 can bake them in as defaults. It is also the clearest example of the fold shape:
 local files become package exports, parent packages combine child exports with
 their own local state, and the recursive target climbs toward the root.
@@ -281,7 +292,7 @@ both mention `srcs`.
 A future helper can likely be:
 
 ```python
-mirror_attr_policy(
+mirror_attr_rewrite(
     name = "mirror_library_srcs_to_test",
     from_kind = "rust_library",
     to_kind = "rust_test",
@@ -298,7 +309,7 @@ rule read API.
 - no generic matcher algebra
 - no arbitrary BUILD AST mutation
 - no user-configured mounts yet
-- no inline policy programming model in BUILD comments
+- no inline definition programming model in BUILD comments
 
 The intent is still the same: real Starlark, but a pocketknife rather than a
 cockpit—purpose-built for folding project-local build knowledge back through a

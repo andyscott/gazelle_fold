@@ -1,7 +1,7 @@
-"""Helpers for file-rollup policies."""
+"""Helpers for file-rollup folds."""
 
 
-def file_rollup_policy(name, include = None, local_name = None, recursive_name = None):
+def file_rollup_fold(name, include = None, local_name = None, recursive_name = None):
     def _apply(ctx):
         active_include = ctx.params.get("include", include)
         active_local_name = ctx.params.get("local_name", local_name)
@@ -52,7 +52,7 @@ def file_rollup_policy(name, include = None, local_name = None, recursive_name =
     else:
         params["recursive_name"] = gazelle_fold.param(type = "string", default = recursive_name)
 
-    gazelle_fold.package_policy(
+    gazelle_fold.fold(
         name = name,
         params = params,
         apply = _apply,

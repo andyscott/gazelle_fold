@@ -12,25 +12,25 @@ keep automated edits converging toward the repo's own build patterns.
 The golden path is intentionally short:
 
 ```python
-# gazelle:policy import("std:policies/file_rollup.star")
-# gazelle:policy import("std:policies/required_tags.star")
-# gazelle:policy import("std:policies/forbidden_deps.star")
-# gazelle:policy use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
-# gazelle:policy use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
-# gazelle:policy use("forbidden_deps", scope = "app/...", kinds = ["rust_library"], deny = ["//legacy/..."])
+# gazelle:fold import("std:folds/file_rollup.star")
+# gazelle:fold import("std:rewrites/required_tags.star")
+# gazelle:fold import("std:policies/forbidden_deps.star")
+# gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:fold use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
+# gazelle:fold use("forbidden_deps", scope = "app/...", kinds = ["rust_library"], deny = ["//legacy/..."])
 ```
 
-Those imports load stock policies from the bundled `std` mount. `use(...)`
+Those imports load stock definitions from the bundled `std` mount. `use(...)`
 activates them for a relative package scope and supplies their parameters.
 Closer activations layer over farther ones, so a child package can override only
 the parameter it cares about:
 
 ```python
 # inherited `kinds` stays in force; only `tags` changes here
-# gazelle:policy use("required_tags", scope = ".", tags = ["team:child"])
+# gazelle:fold use("required_tags", scope = ".", tags = ["team:child"])
 ```
 
-The bundled policies show the three parts of the model:
+The bundled definitions show the three parts of the model:
 
 ```text
 file_rollup      fold child exports into ancestor targets
@@ -49,7 +49,7 @@ load("@gazelle//:def.bzl", "gazelle_binary")
 
 gazelle_binary(
     name = "gazelle_fold",
-    languages = ["@gazelle_fold//language/policy"],
+    languages = ["@gazelle_fold//language/fold"],
     version = 2,
 )
 ```
@@ -66,7 +66,7 @@ and tests as well.
 
 ## Module paths
 
-Policy modules resolve through a small mount table:
+Modules resolve through a small mount table:
 
 ```text
 std:<path>    bundled gazelle_fold standard library
@@ -80,11 +80,11 @@ the module language.
 
 ## Reuse or customize
 
-Stock policies are importable entrypoints for common fold steps and rule hooks:
+Stock definitions are importable entrypoints for common fold steps and rule hooks:
 
 ```python
-std:policies/file_rollup.star
-std:policies/required_tags.star
+std:folds/file_rollup.star
+std:rewrites/required_tags.star
 std:policies/forbidden_deps.star
 ```
 
@@ -92,16 +92,16 @@ If you want repo-specific names or defaults, load the bundled helper library
 from your own `.star` entrypoint:
 
 ```python
-load("std:lib/file_rollup.star", "file_rollup_policy")
+load("std:lib/file_rollup.star", "file_rollup_fold")
 load("std:lib/forbidden_deps.star", "forbidden_deps_policy")
-load("std:lib/required_tags.star", "required_tags_policy")
+load("std:lib/required_tags.star", "required_tags_rewrite")
 
-required_tags_policy(
+required_tags_rewrite(
     name = "rust_required_tags",
     kinds = ["rust_library", "rust_binary", "rust_test"],
 )
 
-file_rollup_policy(
+file_rollup_fold(
     name = "rust_files",
     local_name = "all_sources",
     recursive_name = "all_sources_recursive",
@@ -118,18 +118,18 @@ forbidden_deps_policy(
 Then import the repo-owned entrypoint:
 
 ```python
-# gazelle:policy import("root:build/policies/rust.star")
-# gazelle:policy use("rust_required_tags", scope = "...", tags = ["team:runtime"])
-# gazelle:policy use("rust_files", scope = "...")
+# gazelle:fold import("root:build/gazelle_fold/rust.star")
+# gazelle:fold use("rust_required_tags", scope = "...", tags = ["team:runtime"])
+# gazelle:fold use("rust_files", scope = "...")
 ```
 
 Supported scopes are `"."`, `"..."`, `"bar"`, and `"bar/..."`; they are
 relative to the package containing the directive.
 
-To exempt exactly one following rule:
+To skip exactly one following rule action:
 
 ```python
-# gazelle:policy exempt("required_tags", reason = "vendored target")
+# gazelle:fold skip("required_tags", reason = "vendored target")
 rust_library(
     name = "vendored",
 )
@@ -141,14 +141,15 @@ The built-in library is ordinary Starlark layered over a deliberately small host
 
 ```python
 gazelle_fold.param(type, required = False, default = None)
-gazelle_fold.rule_policy(name, params = {}, apply = fn)
-gazelle_fold.package_policy(name, params = {}, apply = fn)
+gazelle_fold.fold(name, params = {}, apply = fn)
+gazelle_fold.rewrite(name, params = {}, apply = fn)
+gazelle_fold.policy(name, params = {}, apply = fn)
 ```
 
-Rule callbacks receive `(ctx, rule)`. Package callbacks receive `(ctx)`.
-Package callbacks are the fold steps: they can read child exports, emit local
-targets, and export state upward for ancestors. Rule callbacks are the local
-companion for target edits and enforcement.
+Fold callbacks receive `(ctx)`. Rewrites and policies receive `(ctx, rule)`.
+Folds can read child exports, emit local targets, and export state upward for
+ancestors. Rewrites change local rules. Policies are the judging surface: they
+can report violations and fail the run.
 
 ```text
 rule.kind
@@ -159,17 +160,17 @@ rule.ensure_list_attr_contains(name, values)
 rule.deps_matching(patterns)
 
 ctx.rel
-ctx.policy_name
+ctx.name
 ctx.params
-ctx.report_violation(message)
 ctx.matching_files(include)
 ctx.ensure_filegroup(name, srcs, public = False)
 ctx.remove_filegroup(name)
 ctx.child_exports(name)
 ctx.export(name, label)
+ctx.report_violation(message)  # policies only
 ```
 
-`params` is a real policy contract: unknown names, missing required params, and
+`params` is a real definition contract: unknown names, missing required params, and
 wrong types are rejected instead of silently falling through.
 
 ## Current limits
@@ -190,5 +191,5 @@ wrong types are rejected instead of silently falling through.
   left untouched instead of being rewritten from partial knowledge.
 
 See [`docs/starlark-api-redesign.md`](docs/starlark-api-redesign.md) for the
-fold design rationale, [`examples/`](examples/) for copyable policy files, and
+fold design rationale, [`examples/`](examples/) for copyable examples, and
 [`tests/apply_mvp`](tests/apply_mvp/) for an end-to-end fixture.

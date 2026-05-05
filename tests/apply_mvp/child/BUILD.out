@@ -1,4 +1,4 @@
-# gazelle:policy use("required_tags", scope = ".", tags = ["team:child"])
+# gazelle:fold use("required_tags", scope = ".", tags = ["team:child"])
 
 rust_library(
     name = "child_lib",

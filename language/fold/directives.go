@@ -1,4 +1,4 @@
-package policy
+package fold
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ type directiveKind int
 const (
 	directiveImport directiveKind = iota
 	directiveUse
-	directiveExempt
+	directiveSkip
 )
 
 type parsedDirective struct {
@@ -31,19 +31,19 @@ func parseDirective(value string) (parsedDirective, error) {
 	// the whole directive surface into a bespoke parser.
 	parseValue := value
 	if strings.HasPrefix(strings.TrimSpace(value), "import(") {
-		parseValue = strings.Replace(value, "import(", "policy_import(", 1)
+		parseValue = strings.Replace(value, "import(", "fold_import(", 1)
 	}
-	expr, err := syntax.ParseExpr("gazelle:policy", parseValue, 0)
+	expr, err := syntax.ParseExpr("gazelle:fold", parseValue, 0)
 	if err != nil {
 		return parsedDirective{}, err
 	}
 	call, ok := expr.(*syntax.CallExpr)
 	if !ok {
-		return parsedDirective{}, fmt.Errorf("policy directive must be one function call")
+		return parsedDirective{}, fmt.Errorf("fold directive must be one function call")
 	}
 	fn, ok := call.Fn.(*syntax.Ident)
 	if !ok {
-		return parsedDirective{}, fmt.Errorf("policy directive must call a bare function")
+		return parsedDirective{}, fmt.Errorf("fold directive must call a bare function")
 	}
 
 	positional, kwargs, err := splitArgs(call.Args)
@@ -52,7 +52,7 @@ func parseDirective(value string) (parsedDirective, error) {
 	}
 
 	switch fn.Name {
-	case "policy_import":
+	case "fold_import":
 		if len(positional) != 1 || len(kwargs) != 0 {
 			return parsedDirective{}, fmt.Errorf("import expects exactly one label")
 		}
@@ -63,11 +63,11 @@ func parseDirective(value string) (parsedDirective, error) {
 		return parsedDirective{Kind: directiveImport, Label: label}, nil
 	case "use":
 		if len(positional) != 1 {
-			return parsedDirective{}, fmt.Errorf("use expects exactly one positional policy name")
+			return parsedDirective{}, fmt.Errorf("use expects exactly one positional definition name")
 		}
 		name, ok := positional[0].(string)
 		if !ok {
-			return parsedDirective{}, fmt.Errorf("use policy name must be a string")
+			return parsedDirective{}, fmt.Errorf("use definition name must be a string")
 		}
 		rawScope, ok := kwargs["scope"].(string)
 		if !ok {
@@ -84,28 +84,28 @@ func parseDirective(value string) (parsedDirective, error) {
 			Scope:  scope,
 			Params: kwargs,
 		}, nil
-	case "exempt":
+	case "skip":
 		if len(positional) != 1 {
-			return parsedDirective{}, fmt.Errorf("exempt expects exactly one positional policy name")
+			return parsedDirective{}, fmt.Errorf("skip expects exactly one positional definition name")
 		}
 		name, ok := positional[0].(string)
 		if !ok {
-			return parsedDirective{}, fmt.Errorf("exempt policy name must be a string")
+			return parsedDirective{}, fmt.Errorf("skip definition name must be a string")
 		}
 		reason, ok := kwargs["reason"].(string)
 		if !ok || reason == "" {
-			return parsedDirective{}, fmt.Errorf("exempt requires a non-empty string reason")
+			return parsedDirective{}, fmt.Errorf("skip requires a non-empty string reason")
 		}
 		if len(kwargs) != 1 {
-			return parsedDirective{}, fmt.Errorf("exempt only accepts reason")
+			return parsedDirective{}, fmt.Errorf("skip only accepts reason")
 		}
 		return parsedDirective{
-			Kind:   directiveExempt,
+			Kind:   directiveSkip,
 			Name:   name,
 			Reason: reason,
 		}, nil
 	default:
-		return parsedDirective{}, fmt.Errorf("unknown policy directive %q", fn.Name)
+		return parsedDirective{}, fmt.Errorf("unknown fold directive %q", fn.Name)
 	}
 }
 
@@ -164,11 +164,11 @@ func literalValue(expr syntax.Expr) (any, error) {
 		for _, item := range e.List {
 			value, ok := item.(*syntax.Literal)
 			if !ok {
-				return nil, fmt.Errorf("only string lists are supported in policy directives")
+				return nil, fmt.Errorf("only string lists are supported in fold directives")
 			}
 			str, ok := value.Value.(string)
 			if !ok {
-				return nil, fmt.Errorf("only string lists are supported in policy directives")
+				return nil, fmt.Errorf("only string lists are supported in fold directives")
 			}
 			values = append(values, str)
 		}

@@ -1,7 +1,7 @@
-"""Helpers for required-tags policies."""
+"""Helpers for required-tags rewrites."""
 
 
-def required_tags_policy(name, kinds = None, tags = []):
+def required_tags_rewrite(name, kinds = None, tags = []):
     def _apply(ctx, rule):
         active_kinds = ctx.params["kinds"] if kinds == None else kinds
         if not rule.matches_kind(active_kinds):
@@ -17,7 +17,7 @@ def required_tags_policy(name, kinds = None, tags = []):
     if kinds == None:
         params["kinds"] = gazelle_fold.param(type = "strings", required = True)
 
-    gazelle_fold.rule_policy(
+    gazelle_fold.rewrite(
         name = name,
         params = params,
         apply = _apply,

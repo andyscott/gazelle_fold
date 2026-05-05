@@ -22,7 +22,7 @@ def forbidden_deps_policy(name, kinds = None, deny = None):
     if kinds == None:
         params["kinds"] = gazelle_fold.param(type = "strings", required = True)
 
-    gazelle_fold.rule_policy(
+    gazelle_fold.policy(
         name = name,
         params = params,
         apply = _apply,

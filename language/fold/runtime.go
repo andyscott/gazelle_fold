@@ -1,4 +1,4 @@
-package policy
+package fold
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 	"go.starlark.net/starlark"
 )
 
-func runRulePolicy(active effectivePolicy, rel, file string, r *rule.Rule, reportViolation func(policyViolation)) error {
+func runRuleDefinition(active effectiveDefinition, rel, file string, r *rule.Rule, reportViolation func(policyViolation)) error {
 	params, err := active.normalizedParams()
 	if err != nil {
 		return err
@@ -22,11 +22,12 @@ func runRulePolicy(active effectivePolicy, rel, file string, r *rule.Rule, repor
 		starlark.Tuple{
 			&ruleContextValue{
 				rel:             rel,
-				policyName:      active.Activation.Name,
+				name:            active.Activation.Name,
 				params:          params,
 				file:            file,
 				ruleKind:        r.Kind(),
 				ruleName:        r.Name(),
+				allowViolation:  active.Definition.Kind == kindRulePolicy,
 				reportViolation: reportViolation,
 			},
 			&ruleValue{
@@ -40,9 +41,9 @@ func runRulePolicy(active effectivePolicy, rel, file string, r *rule.Rule, repor
 	return err
 }
 
-func runPackagePolicy(active effectivePolicy, ctx *packageContextValue) error {
+func runFold(active effectiveDefinition, ctx *foldContextValue) error {
 	_, err := starlark.Call(
-		&starlark.Thread{Name: "gazelle_fold package " + active.Activation.Name},
+		&starlark.Thread{Name: "gazelle_fold fold " + active.Activation.Name},
 		active.Definition.Apply,
 		starlark.Tuple{ctx},
 		nil,
@@ -52,39 +53,46 @@ func runPackagePolicy(active effectivePolicy, ctx *packageContextValue) error {
 
 type ruleContextValue struct {
 	rel             string
-	policyName      string
+	name            string
 	params          *starlark.Dict
 	file            string
 	ruleKind        string
 	ruleName        string
+	allowViolation  bool
 	reportViolation func(policyViolation)
 }
 
-func (*ruleContextValue) String() string       { return "rule_policy_context" }
-func (*ruleContextValue) Type() string         { return "rule_policy_context" }
+func (*ruleContextValue) String() string       { return "rule_context" }
+func (*ruleContextValue) Type() string         { return "rule_context" }
 func (*ruleContextValue) Freeze()              {}
 func (*ruleContextValue) Truth() starlark.Bool { return starlark.True }
 func (*ruleContextValue) Hash() (uint32, error) {
-	return 0, fmt.Errorf("rule policy context is unhashable")
+	return 0, fmt.Errorf("rule context is unhashable")
 }
 
 func (ctx *ruleContextValue) Attr(name string) (starlark.Value, error) {
 	switch name {
 	case "rel":
 		return starlark.String(ctx.rel), nil
-	case "policy_name":
-		return starlark.String(ctx.policyName), nil
+	case "name":
+		return starlark.String(ctx.name), nil
 	case "params":
 		return ctx.params, nil
 	case "report_violation":
+		if !ctx.allowViolation {
+			return nil, nil
+		}
 		return ruleContextReportViolation.BindReceiver(ctx), nil
 	default:
 		return nil, nil
 	}
 }
 
-func (*ruleContextValue) AttrNames() []string {
-	return []string{"rel", "policy_name", "params", "report_violation"}
+func (ctx *ruleContextValue) AttrNames() []string {
+	if !ctx.allowViolation {
+		return []string{"rel", "name", "params"}
+	}
+	return []string{"rel", "name", "params", "report_violation"}
 }
 
 type ruleValue struct {
@@ -134,7 +142,7 @@ var ruleContextReportViolation = starlark.NewBuiltin("report_violation", func(_ 
 	if self.reportViolation != nil {
 		self.reportViolation(policyViolation{
 			File:       self.file,
-			PolicyName: self.policyName,
+			PolicyName: self.name,
 			RuleKind:   self.ruleKind,
 			RuleName:   self.ruleName,
 			Message:    message,
@@ -209,8 +217,8 @@ var ruleDepsMatching = starlark.NewBuiltin("deps_matching", func(_ *starlark.Thr
 	return stringList(matched), nil
 })
 
-type packageContextValue struct {
-	lang     *policyLang
+type foldContextValue struct {
+	lang     *foldLang
 	args     language.GenerateArgs
 	active   activation
 	params   *starlark.Dict
@@ -220,12 +228,12 @@ type packageContextValue struct {
 	complete bool
 }
 
-func newPackageContextValue(lang *policyLang, args language.GenerateArgs, active effectivePolicy) (*packageContextValue, error) {
+func newFoldContextValue(lang *foldLang, args language.GenerateArgs, active effectiveDefinition) (*foldContextValue, error) {
 	params, err := active.normalizedParams()
 	if err != nil {
 		return nil, err
 	}
-	return &packageContextValue{
+	return &foldContextValue{
 		lang:     lang,
 		args:     args,
 		active:   active.Activation,
@@ -235,19 +243,19 @@ func newPackageContextValue(lang *policyLang, args language.GenerateArgs, active
 	}, nil
 }
 
-func (*packageContextValue) String() string       { return "package_policy_context" }
-func (*packageContextValue) Type() string         { return "package_policy_context" }
-func (*packageContextValue) Freeze()              {}
-func (*packageContextValue) Truth() starlark.Bool { return starlark.True }
-func (*packageContextValue) Hash() (uint32, error) {
-	return 0, fmt.Errorf("package policy context is unhashable")
+func (*foldContextValue) String() string       { return "fold_context" }
+func (*foldContextValue) Type() string         { return "fold_context" }
+func (*foldContextValue) Freeze()              {}
+func (*foldContextValue) Truth() starlark.Bool { return starlark.True }
+func (*foldContextValue) Hash() (uint32, error) {
+	return 0, fmt.Errorf("fold context is unhashable")
 }
 
-func (ctx *packageContextValue) Attr(name string) (starlark.Value, error) {
+func (ctx *foldContextValue) Attr(name string) (starlark.Value, error) {
 	switch name {
 	case "rel":
 		return starlark.String(ctx.args.Rel), nil
-	case "policy_name":
+	case "name":
 		return starlark.String(ctx.active.Name), nil
 	case "params":
 		return ctx.params, nil
@@ -266,12 +274,12 @@ func (ctx *packageContextValue) Attr(name string) (starlark.Value, error) {
 	}
 }
 
-func (*packageContextValue) AttrNames() []string {
-	return []string{"rel", "policy_name", "params", "matching_files", "ensure_filegroup", "remove_filegroup", "child_exports", "export"}
+func (*foldContextValue) AttrNames() []string {
+	return []string{"rel", "name", "params", "matching_files", "ensure_filegroup", "remove_filegroup", "child_exports", "export"}
 }
 
 var packageMatchingFiles = starlark.NewBuiltin("matching_files", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	self := fn.Receiver().(*packageContextValue)
+	self := fn.Receiver().(*foldContextValue)
 	var include starlark.Value
 	if err := starlark.UnpackArgs("matching_files", args, kwargs, "include", &include); err != nil {
 		return nil, err
@@ -284,7 +292,7 @@ var packageMatchingFiles = starlark.NewBuiltin("matching_files", func(_ *starlar
 })
 
 var packageEnsureFilegroup = starlark.NewBuiltin("ensure_filegroup", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	self := fn.Receiver().(*packageContextValue)
+	self := fn.Receiver().(*foldContextValue)
 	var (
 		name   string
 		srcs   starlark.Value
@@ -314,7 +322,7 @@ var packageEnsureFilegroup = starlark.NewBuiltin("ensure_filegroup", func(_ *sta
 })
 
 var packageRemoveFilegroup = starlark.NewBuiltin("remove_filegroup", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	self := fn.Receiver().(*packageContextValue)
+	self := fn.Receiver().(*foldContextValue)
 	var name string
 	if err := starlark.UnpackArgs("remove_filegroup", args, kwargs, "name", &name); err != nil {
 		return nil, err
@@ -327,7 +335,7 @@ var packageRemoveFilegroup = starlark.NewBuiltin("remove_filegroup", func(_ *sta
 })
 
 var packageChildExports = starlark.NewBuiltin("child_exports", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	self := fn.Receiver().(*packageContextValue)
+	self := fn.Receiver().(*foldContextValue)
 	var name string
 	if err := starlark.UnpackArgs("child_exports", args, kwargs, "name", &name); err != nil {
 		return nil, err
@@ -339,7 +347,7 @@ var packageChildExports = starlark.NewBuiltin("child_exports", func(_ *starlark.
 		if !self.active.Scope.covers(self.active.Origin, childRel) {
 			continue
 		}
-		childState, ok := self.lang.packageStates[childRel][self.active.Name]
+		childState, ok := self.lang.foldStates[childRel][self.active.Name]
 		if !ok || !childState.Generated || !childState.Complete {
 			complete = false
 			continue
@@ -359,7 +367,7 @@ var packageChildExports = starlark.NewBuiltin("child_exports", func(_ *starlark.
 })
 
 var packageExport = starlark.NewBuiltin("export", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	self := fn.Receiver().(*packageContextValue)
+	self := fn.Receiver().(*foldContextValue)
 	var (
 		name  string
 		label string

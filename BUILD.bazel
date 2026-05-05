@@ -4,7 +4,7 @@ load("@gazelle//:def.bzl", "gazelle", "gazelle_binary")
 gazelle_binary(
     name = "gazelle_fold",
     languages = [
-        "//language/policy",
+        "//language/fold",
         "@gazelle//language/go",
     ],
     visibility = ["//visibility:public"],

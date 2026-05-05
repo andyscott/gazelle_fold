@@ -1,4 +1,4 @@
-package policy
+package fold
 
 import (
 	"fmt"
@@ -12,12 +12,26 @@ const (
 	languageName = "gazelle_fold"
 )
 
-type policyKind int
+type definitionKind int
 
 const (
-	kindRulePolicy policyKind = iota
-	kindPackagePolicy
+	kindRuleRewrite definitionKind = iota
+	kindRulePolicy
+	kindFold
 )
+
+func (k definitionKind) String() string {
+	switch k {
+	case kindRuleRewrite:
+		return "rewrite"
+	case kindRulePolicy:
+		return "policy"
+	case kindFold:
+		return "fold"
+	default:
+		return "definition"
+	}
+}
 
 type paramType int
 
@@ -37,7 +51,7 @@ type paramSpec struct {
 
 type definition struct {
 	Name   string
-	Kind   policyKind
+	Kind   definitionKind
 	Params map[string]paramSpec
 	Apply  *starlark.Function
 }
@@ -50,13 +64,13 @@ type activation struct {
 	Order  int
 }
 
-type policyConfig struct {
+type foldConfig struct {
 	Definitions map[string]definition
 	Activations []activation
 	nextOrder   int
 }
 
-type packagePolicyState struct {
+type foldState struct {
 	Generated bool
 	Complete  bool
 	Exports   map[string]string
@@ -81,17 +95,17 @@ func (v policyViolation) String() string {
 	)
 }
 
-func newPolicyConfig() *policyConfig {
-	return &policyConfig{
+func newFoldConfig() *foldConfig {
+	return &foldConfig{
 		Definitions: make(map[string]definition),
 	}
 }
 
-func (c *policyConfig) clone() *policyConfig {
+func (c *foldConfig) clone() *foldConfig {
 	if c == nil {
-		return newPolicyConfig()
+		return newFoldConfig()
 	}
-	out := &policyConfig{
+	out := &foldConfig{
 		Definitions: make(map[string]definition, len(c.Definitions)),
 		Activations: make([]activation, len(c.Activations)),
 		nextOrder:   c.nextOrder,
@@ -160,7 +174,7 @@ func cloneExports(exports map[string]string) map[string]string {
 	return out
 }
 
-func (c *policyConfig) addActivation(name, origin string, scope packageScope, params map[string]any) {
+func (c *foldConfig) addActivation(name, origin string, scope packageScope, params map[string]any) {
 	c.nextOrder++
 	c.Activations = append(c.Activations, activation{
 		Name:   name,

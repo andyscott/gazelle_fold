@@ -1,4 +1,4 @@
-package policy
+package fold
 
 import (
 	"fmt"
@@ -29,17 +29,17 @@ func parseScope(raw string) (packageScope, error) {
 		return packageScope{raw: raw, kind: scopeSubtree}, nil
 	}
 	if raw == "" || strings.HasPrefix(raw, "/") || strings.Contains(raw, "//") {
-		return packageScope{}, fmt.Errorf("invalid policy scope %q", raw)
+		return packageScope{}, fmt.Errorf("invalid fold scope %q", raw)
 	}
 	if strings.HasSuffix(raw, "/...") {
 		p := strings.TrimSuffix(raw, "/...")
 		if !validRelativePackage(p) {
-			return packageScope{}, fmt.Errorf("invalid policy scope %q", raw)
+			return packageScope{}, fmt.Errorf("invalid fold scope %q", raw)
 		}
 		return packageScope{raw: raw, kind: scopePackageSubtree, path: p}, nil
 	}
 	if !validRelativePackage(raw) {
-		return packageScope{}, fmt.Errorf("invalid policy scope %q", raw)
+		return packageScope{}, fmt.Errorf("invalid fold scope %q", raw)
 	}
 	return packageScope{raw: raw, kind: scopePackage, path: raw}, nil
 }
