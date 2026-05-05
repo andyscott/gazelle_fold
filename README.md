@@ -1,15 +1,15 @@
 # gazelle_fold
 
 `gazelle_fold` is a small Gazelle extension for folding over a BUILD tree from
-leaf packages back toward the root. As the fold climbs, it can synthesize
-ancestor-facing targets from child exports, modify local targets, and enforce
-project-local BUILD policies beside the packages they govern.
+leaf packages back toward the root. As it walks upward, it can build parent
+targets from child exports, update local targets, and enforce project-local
+BUILD policies beside the packages they govern.
 
 That shape is useful in large monorepos, especially when humans and coding
 agents are both writing BUILD files: teams can encode local conventions once and
-keep automated edits converging toward the repo's own build patterns.
+keep generated edits aligned with the repo's own build patterns.
 
-The golden path is intentionally short:
+The basic setup is short:
 
 ```python
 # gazelle:fold import("std:folds/file_rollup.star")
@@ -22,7 +22,7 @@ The golden path is intentionally short:
 
 Those imports load stock definitions from the bundled `std` mount. `use(...)`
 activates them for a relative package scope and supplies their parameters.
-Closer activations layer over farther ones, so a child package can override only
+Nearer activations layer over farther ones, so a child package can override only
 the parameter it cares about:
 
 ```python
@@ -30,7 +30,7 @@ the parameter it cares about:
 # gazelle:fold use("required_tags", scope = ".", tags = ["team:child"])
 ```
 
-The bundled definitions show the three parts of the model:
+The bundled definitions show the three things the extension can do:
 
 ```text
 file_rollup      fold child exports into ancestor targets
@@ -38,9 +38,9 @@ required_tags    modify local targets in place
 forbidden_deps   reject local policy violations
 ```
 
-`file_rollup` is the canonical fold-shaped example: leaf packages export local
+`file_rollup` is the canonical fold example: leaf packages export local
 source groups, parents combine child exports with their own local files, and a
-full walk can carry the recursive rollup all the way to the root.
+full walk carries the recursive rollup all the way to the root.
 
 For a tree like:
 
@@ -56,14 +56,14 @@ app/
         └── lib.rs
 ```
 
-one root directive:
+With one directive at the root:
 
 ```python
 # gazelle:fold import("std:folds/file_rollup.star")
 # gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
 ```
 
-lets the leaf export itself:
+the leaf package exports its local files:
 
 ```python
 # child/grandchild/BUILD.bazel
@@ -82,7 +82,7 @@ filegroup(
 )
 ```
 
-the parent fold that export upward:
+its parent adds the child export to its own local files:
 
 ```python
 # child/BUILD.bazel
@@ -96,7 +96,7 @@ filegroup(
 )
 ```
 
-and the root receive the whole subtree:
+and the root receives the whole subtree:
 
 ```python
 # BUILD.bazel
@@ -110,9 +110,9 @@ filegroup(
 )
 ```
 
-Each package contributes only its local files plus the exports from its direct
-children; the recursive target emerges from the fold rather than from one giant
-repo-global declaration.
+Each package contributes only its local files and the exports from its direct
+children. The recursive target emerges from the fold instead of one giant
+repo-wide declaration.
 
 ## Add the extension
 
@@ -198,7 +198,7 @@ Then import the repo-owned entrypoint:
 Supported scopes are `"."`, `"..."`, `"bar"`, and `"bar/..."`; they are
 relative to the package containing the directive.
 
-To skip exactly one following rule action:
+To skip one rule action for exactly one following target:
 
 ```python
 # gazelle:fold skip("required_tags", reason = "vendored target")
@@ -219,9 +219,9 @@ gazelle_fold.policy(name, params = {}, apply = fn)
 ```
 
 Fold callbacks receive `(ctx)`. Rewrites and policies receive `(ctx, rule)`.
-Folds can read child exports, emit local targets, and export state upward for
-ancestors. Rewrites change local rules. Policies are the judging surface: they
-can report violations and fail the run.
+Folds can read child exports, emit local targets, and pass state upward to
+ancestors. Rewrites change local rules. Policies report violations and can fail
+the run.
 
 ```text
 rule.kind
@@ -242,17 +242,17 @@ ctx.export(name, label)
 ctx.report_violation(message)  # policies only
 ```
 
-`params` is a real definition contract: unknown names, missing required params, and
-wrong types are rejected instead of silently falling through.
+`params` is a real definition contract: unknown names, missing required params,
+and wrong types are rejected instead of silently falling through.
 
 ## Current limits
 
-- Directive comments are a tiny one-command language, not general Starlark.
+- Directive comments use a tiny one-command language, not general Starlark.
 - The built-in mount table exposes `std` and `root`; user-configured mounts are
   not surfaced yet.
 - The host currently exposes safe string-list edits and filegroup generation,
   not arbitrary BUILD AST mutation.
-- `required_tags` only rewrites literal string-list attrs; complex
+- `required_tags` only rewrites literal string-list attributes; complex
   `select(...)`-style expressions are skipped rather than guessed at.
 - `forbidden_deps` reports direct labels from literal `deps` lists and fails the
   Gazelle run before files are written. Patterns are absolute Bazel labels such
