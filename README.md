@@ -42,6 +42,78 @@ forbidden_deps   reject local policy violations
 source groups, parents combine child exports with their own local files, and a
 full walk can carry the recursive rollup all the way to the root.
 
+For a tree like:
+
+```text
+app/
+├── BUILD.bazel
+├── root.rs
+└── child/
+    ├── BUILD.bazel
+    ├── lib.rs
+    └── grandchild/
+        ├── BUILD.bazel
+        └── lib.rs
+```
+
+one root directive:
+
+```python
+# gazelle:fold import("std:folds/file_rollup.star")
+# gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+```
+
+lets the leaf export itself:
+
+```python
+# child/grandchild/BUILD.bazel
+filegroup(
+    name = "all_sources",
+    srcs = [
+        "BUILD.bazel",
+        "lib.rs",
+    ],
+)
+
+filegroup(
+    name = "all_sources_recursive",
+    srcs = [":all_sources"],
+    visibility = ["//visibility:public"],
+)
+```
+
+the parent fold that export upward:
+
+```python
+# child/BUILD.bazel
+filegroup(
+    name = "all_sources_recursive",
+    srcs = [
+        ":all_sources",
+        "//child/grandchild:all_sources_recursive",
+    ],
+    visibility = ["//visibility:public"],
+)
+```
+
+and the root receive the whole subtree:
+
+```python
+# BUILD.bazel
+filegroup(
+    name = "all_sources_recursive",
+    srcs = [
+        ":all_sources",
+        "//child:all_sources_recursive",
+    ],
+    visibility = ["//visibility:public"],
+)
+```
+
+Each package contributes only its local files plus the exports from its direct
+children; the recursive target emerges from the fold rather than from one giant
+repo-global declaration.
+
 ## Add the extension
 
 ```python
