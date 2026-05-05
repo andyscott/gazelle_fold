@@ -1,16 +1,22 @@
 # gazelle_fold
 
-`gazelle_fold` is a small Gazelle extension for BUILD-file policies that
-should live beside the packages they govern.
+`gazelle_fold` is a small Gazelle extension for folding over a BUILD tree from
+leaf packages back toward the root. As the fold climbs, it can synthesize
+ancestor-facing targets from child exports, modify local targets, and enforce
+project-local BUILD policies beside the packages they govern.
+
+That shape is useful in large monorepos, especially when humans and coding
+agents are both writing BUILD files: teams can encode local conventions once and
+keep automated edits converging toward the repo's own build patterns.
 
 The golden path is intentionally short:
 
 ```python
-# gazelle:policy import("std:policies/required_tags.star")
 # gazelle:policy import("std:policies/file_rollup.star")
+# gazelle:policy import("std:policies/required_tags.star")
 # gazelle:policy import("std:policies/forbidden_deps.star")
-# gazelle:policy use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
 # gazelle:policy use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:policy use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
 # gazelle:policy use("forbidden_deps", scope = "app/...", kinds = ["rust_library"], deny = ["//legacy/..."])
 ```
 
@@ -23,6 +29,18 @@ the parameter it cares about:
 # inherited `kinds` stays in force; only `tags` changes here
 # gazelle:policy use("required_tags", scope = ".", tags = ["team:child"])
 ```
+
+The bundled policies show the three parts of the model:
+
+```text
+file_rollup      fold child exports into ancestor targets
+required_tags    modify local targets in place
+forbidden_deps   reject local policy violations
+```
+
+`file_rollup` is the canonical fold-shaped example: leaf packages export local
+source groups, parents combine child exports with their own local files, and a
+full walk can carry the recursive rollup all the way to the root.
 
 ## Add the extension
 
@@ -62,11 +80,11 @@ the module language.
 
 ## Reuse or customize
 
-Stock policies are importable entrypoints:
+Stock policies are importable entrypoints for common fold steps and rule hooks:
 
 ```python
-std:policies/required_tags.star
 std:policies/file_rollup.star
+std:policies/required_tags.star
 std:policies/forbidden_deps.star
 ```
 
@@ -128,6 +146,9 @@ gazelle_fold.package_policy(name, params = {}, apply = fn)
 ```
 
 Rule callbacks receive `(ctx, rule)`. Package callbacks receive `(ctx)`.
+Package callbacks are the fold steps: they can read child exports, emit local
+targets, and export state upward for ancestors. Rule callbacks are the local
+companion for target edits and enforcement.
 
 ```text
 rule.kind
@@ -169,5 +190,5 @@ wrong types are rejected instead of silently falling through.
   left untouched instead of being rewritten from partial knowledge.
 
 See [`docs/starlark-api-redesign.md`](docs/starlark-api-redesign.md) for the
-design rationale, [`examples/`](examples/) for copyable policy files, and
+fold design rationale, [`examples/`](examples/) for copyable policy files, and
 [`tests/apply_mvp`](tests/apply_mvp/) for an end-to-end fixture.

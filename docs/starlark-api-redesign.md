@@ -1,5 +1,18 @@
 # Starlark API design
 
+## Product thesis
+
+`gazelle_fold` should be understood first as a bottom-up fold over the BUILD
+tree, not as a generic policy engine. Package callbacks run as Gazelle visits
+packages, may export state upward, and can synthesize parent-facing targets from
+child exports. Rule callbacks are the local companion: they can modify or
+validate the targets in the package currently being visited.
+
+That seam is especially valuable in large monorepos, and more so when AI agents
+are authoring BUILD files alongside humans. Repo owners can encode local naming,
+aggregation, and dependency conventions once, then let ordinary Gazelle runs
+pull machine-authored edits back toward the project's own patterns.
+
 ## Recommendation
 
 The public surface should have four layers:
@@ -8,7 +21,7 @@ The public surface should have four layers:
 BUILD directives       activate named policies by package scope
 std:policies/*         ready-made policies users can import directly
 std:lib/*              helper factories for repo-owned policy modules
-gazelle_fold host    a tiny safe runtime for custom policies
+gazelle_fold host      a tiny safe runtime for custom folds and policies
 ```
 
 Module paths resolve through mounts rather than Bazel labels:
@@ -35,14 +48,16 @@ We keep that seam, but make the product much smaller:
 - helper modules are explicit and always loadable
 - user-authored modules are normal mounted files
 - the Go host owns the unsafe BUILD/Gazelle machinery
+- the central abstraction is still the BUILD-tree fold, not a miniature general
+  build language hidden in comments
 
 ## Golden path
 
 ```python
-# gazelle:policy import("std:policies/required_tags.star")
 # gazelle:policy import("std:policies/file_rollup.star")
-# gazelle:policy use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
+# gazelle:policy import("std:policies/required_tags.star")
 # gazelle:policy use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:policy use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
 ```
 
 An activation nearer the target package layers over farther activations, so a
@@ -57,8 +72,8 @@ child can override one field without repeating the entire contract:
 ### Importable stock policies
 
 ```text
-std:policies/required_tags.star
 std:policies/file_rollup.star
+std:policies/required_tags.star
 std:policies/forbidden_deps.star
 ```
 
@@ -158,6 +173,10 @@ through `use(...)`.
 
 ### Package-policy callbacks
 
+Package-policy callbacks are the fold steps. Each package can inspect local
+files, combine exports from already-visited children, generate or remove local
+targets, and export a label upward for ancestors.
+
 ```python
 def apply(ctx):
     ...
@@ -196,7 +215,7 @@ untouched instead of rebuilding them from partial knowledge.
 - mount resolution
 - param validation and activation layering
 - anchored exemptions
-- package-tree traversal and partial-walk completeness
+- leaf-to-root package-tree traversal and partial-walk completeness
 - safe BUILD AST mutations
 - diagnostics and provenance
 
@@ -235,7 +254,9 @@ def file_rollup_policy(name, include = None, local_name = None, recursive_name =
 ```
 
 The stock policy leaves all three fields to `use(...)`. Repo-owned helper calls
-can bake them in as defaults.
+can bake them in as defaults. It is also the clearest example of the fold shape:
+local files become package exports, parent packages combine child exports with
+their own local state, and the recursive target climbs toward the root.
 
 ### `forbidden_deps_policy(...)`
 
@@ -280,4 +301,5 @@ rule read API.
 - no inline policy programming model in BUILD comments
 
 The intent is still the same: real Starlark, but a pocketknife rather than a
-cockpit.
+cockpit—purpose-built for folding project-local build knowledge back through a
+large tree.
