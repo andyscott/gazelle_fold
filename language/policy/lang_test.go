@@ -85,7 +85,7 @@ func TestLoadPolicyFileSupportsRootAndRelativeLoads(t *testing.T) {
 	root := t.TempDir()
 	writePolicyFile(t, root, "build/policies/helpers.star", `
 def register(name):
-    gazelle_policy.rule_policy(
+    gazelle_fold.rule_policy(
         name = name,
         apply = lambda ctx, rule: None,
     )
@@ -108,7 +108,7 @@ register("required_tags")
 func TestLoadPolicyFileSupportsRelativeImportsFromBuildPackage(t *testing.T) {
 	root := t.TempDir()
 	writePolicyFile(t, root, "pkg/policies.star", `
-gazelle_policy.rule_policy(
+gazelle_fold.rule_policy(
     name = "required_tags",
     apply = lambda ctx, rule: None,
 )

@@ -17,7 +17,7 @@ func runRulePolicy(active effectivePolicy, rel, file string, r *rule.Rule, repor
 		return err
 	}
 	_, err = starlark.Call(
-		&starlark.Thread{Name: "gazelle_policy rule " + active.Activation.Name},
+		&starlark.Thread{Name: "gazelle_fold rule " + active.Activation.Name},
 		active.Definition.Apply,
 		starlark.Tuple{
 			&ruleContextValue{
@@ -42,7 +42,7 @@ func runRulePolicy(active effectivePolicy, rel, file string, r *rule.Rule, repor
 
 func runPackagePolicy(active effectivePolicy, ctx *packageContextValue) error {
 	_, err := starlark.Call(
-		&starlark.Thread{Name: "gazelle_policy package " + active.Activation.Name},
+		&starlark.Thread{Name: "gazelle_fold package " + active.Activation.Name},
 		active.Definition.Apply,
 		starlark.Tuple{ctx},
 		nil,

@@ -8,13 +8,13 @@ The public surface should have four layers:
 BUILD directives       activate named policies by package scope
 std:policies/*         ready-made policies users can import directly
 std:lib/*              helper factories for repo-owned policy modules
-gazelle_policy host    a tiny safe runtime for custom policies
+gazelle_fold host    a tiny safe runtime for custom policies
 ```
 
 Module paths resolve through mounts rather than Bazel labels:
 
 ```text
-std:<path>    bundled gazelle_policy standard library
+std:<path>    bundled gazelle_fold standard library
 root:<path>   repository-rooted file
 <path>        relative to the importer
 ```
@@ -111,9 +111,9 @@ load("../shared/common.star", "common")
 ## Minimal host API
 
 ```python
-gazelle_policy.param(type, required = False, default = None)
-gazelle_policy.rule_policy(name, params = {}, apply = fn)
-gazelle_policy.package_policy(name, params = {}, apply = fn)
+gazelle_fold.param(type, required = False, default = None)
+gazelle_fold.rule_policy(name, params = {}, apply = fn)
+gazelle_fold.package_policy(name, params = {}, apply = fn)
 ```
 
 `params` is a schema, not a loose bag. The host rejects:

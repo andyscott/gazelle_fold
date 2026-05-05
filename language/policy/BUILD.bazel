@@ -19,7 +19,7 @@ go_library(
         "builtins/policies/forbidden_deps.star",
         "builtins/policies/required_tags.star",
     ],
-    importpath = "github.com/andyscott/gazelle_policy/language/policy",
+    importpath = "github.com/andyscott/gazelle_fold/language/policy",
     visibility = ["//visibility:public"],
     deps = [
         "@com_github_bazelbuild_buildtools//build",

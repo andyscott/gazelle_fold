@@ -1,6 +1,6 @@
-# gazelle_policy
+# gazelle_fold
 
-`gazelle_policy` is a small Gazelle extension for BUILD-file policies that
+`gazelle_fold` is a small Gazelle extension for BUILD-file policies that
 should live beside the packages they govern.
 
 The golden path is intentionally short:
@@ -30,8 +30,8 @@ the parameter it cares about:
 load("@gazelle//:def.bzl", "gazelle_binary")
 
 gazelle_binary(
-    name = "gazelle_policy",
-    languages = ["@gazelle_policy//language/policy"],
+    name = "gazelle_fold",
+    languages = ["@gazelle_fold//language/policy"],
     version = 2,
 )
 ```
@@ -51,7 +51,7 @@ and tests as well.
 Policy modules resolve through a small mount table:
 
 ```text
-std:<path>    bundled gazelle_policy standard library
+std:<path>    bundled gazelle_fold standard library
 root:<path>   file path anchored at the repository root
 <path>        relative to the importing .star file, or to the BUILD package for import(...)
 ```
@@ -122,9 +122,9 @@ rust_library(
 The built-in library is ordinary Starlark layered over a deliberately small host:
 
 ```python
-gazelle_policy.param(type, required = False, default = None)
-gazelle_policy.rule_policy(name, params = {}, apply = fn)
-gazelle_policy.package_policy(name, params = {}, apply = fn)
+gazelle_fold.param(type, required = False, default = None)
+gazelle_fold.rule_policy(name, params = {}, apply = fn)
+gazelle_fold.package_policy(name, params = {}, apply = fn)
 ```
 
 Rule callbacks receive `(ctx, rule)`. Package callbacks receive `(ctx)`.

@@ -2,24 +2,24 @@ load("@gazelle//:def.bzl", "gazelle_generation_test")
 
 gazelle_generation_test(
     name = "apply_mvp",
-    gazelle_binary = "//:gazelle_policy",
+    gazelle_binary = "//:gazelle_fold",
     test_data = glob(["apply_mvp/**"]),
 )
 
 gazelle_generation_test(
     name = "diff_mode",
-    gazelle_binary = "//:gazelle_policy",
+    gazelle_binary = "//:gazelle_fold",
     test_data = glob(["diff_mode/**"]),
 )
 
 gazelle_generation_test(
     name = "forbidden_deps",
-    gazelle_binary = "//:gazelle_policy",
+    gazelle_binary = "//:gazelle_fold",
     test_data = glob(["forbidden_deps/**"]),
 )
 
 gazelle_generation_test(
     name = "selective_rollup",
-    gazelle_binary = "//:gazelle_policy",
+    gazelle_binary = "//:gazelle_fold",
     test_data = glob(["selective_rollup/**"]),
 )

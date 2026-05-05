@@ -1,8 +1,8 @@
 load("@gazelle//:def.bzl", "gazelle", "gazelle_binary")
 
-# gazelle:prefix github.com/andyscott/gazelle_policy
+# gazelle:prefix github.com/andyscott/gazelle_fold
 gazelle_binary(
-    name = "gazelle_policy",
+    name = "gazelle_fold",
     languages = [
         "//language/policy",
         "@gazelle//language/go",
@@ -13,12 +13,12 @@ gazelle_binary(
 gazelle(
     name = "gazelle",
     command = "fix",
-    gazelle = ":gazelle_policy",
+    gazelle = ":gazelle_fold",
 )
 
 gazelle(
     name = "gazelle_ci",
     command = "fix",
     extra_args = ["-mode=diff"],
-    gazelle = ":gazelle_policy",
+    gazelle = ":gazelle_fold",
 )

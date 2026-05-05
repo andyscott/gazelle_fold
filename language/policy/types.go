@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	configKey    = "gazelle_policy"
-	languageName = "gazelle_policy"
+	configKey    = "gazelle_fold"
+	languageName = "gazelle_fold"
 )
 
 type policyKind int

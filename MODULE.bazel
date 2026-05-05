@@ -1,5 +1,5 @@
 module(
-    name = "gazelle_policy",
+    name = "gazelle_fold",
 )
 
 bazel_dep(name = "gazelle", version = "0.45.0")

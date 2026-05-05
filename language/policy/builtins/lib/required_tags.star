@@ -12,12 +12,12 @@ def required_tags_policy(name, kinds = None, tags = []):
         )
 
     params = {
-        "tags": gazelle_policy.param(type = "strings", default = tags),
+        "tags": gazelle_fold.param(type = "strings", default = tags),
     }
     if kinds == None:
-        params["kinds"] = gazelle_policy.param(type = "strings", required = True)
+        params["kinds"] = gazelle_fold.param(type = "strings", required = True)
 
-    gazelle_policy.rule_policy(
+    gazelle_fold.rule_policy(
         name = name,
         params = params,
         apply = _apply,

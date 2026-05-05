@@ -40,19 +40,19 @@ def file_rollup_policy(name, include = None, local_name = None, recursive_name =
 
     params = {}
     if include == None:
-        params["include"] = gazelle_policy.param(type = "strings", required = True)
+        params["include"] = gazelle_fold.param(type = "strings", required = True)
     else:
-        params["include"] = gazelle_policy.param(type = "strings", default = include)
+        params["include"] = gazelle_fold.param(type = "strings", default = include)
     if local_name == None:
-        params["local_name"] = gazelle_policy.param(type = "string", required = True)
+        params["local_name"] = gazelle_fold.param(type = "string", required = True)
     else:
-        params["local_name"] = gazelle_policy.param(type = "string", default = local_name)
+        params["local_name"] = gazelle_fold.param(type = "string", default = local_name)
     if recursive_name == None:
-        params["recursive_name"] = gazelle_policy.param(type = "string", required = True)
+        params["recursive_name"] = gazelle_fold.param(type = "string", required = True)
     else:
-        params["recursive_name"] = gazelle_policy.param(type = "string", default = recursive_name)
+        params["recursive_name"] = gazelle_fold.param(type = "string", default = recursive_name)
 
-    gazelle_policy.package_policy(
+    gazelle_fold.package_policy(
         name = name,
         params = params,
         apply = _apply,

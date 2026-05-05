@@ -28,7 +28,7 @@ type policyLang struct {
 
 var _ language.Language = (*policyLang)(nil)
 
-// NewLanguage is the public Gazelle integration point for gazelle_policy.
+// NewLanguage is the public Gazelle integration point for gazelle_fold.
 func NewLanguage() language.Language {
 	return &policyLang{
 		packageStates: make(map[string]map[string]packagePolicyState),
@@ -152,7 +152,7 @@ func (l *policyLang) AfterResolvingDeps(_ context.Context) {
 	for _, violation := range violations {
 		log.Print(violation)
 	}
-	log.Fatalf("gazelle_policy: %d policy violation(s)", len(violations))
+	log.Fatalf("gazelle_fold: %d policy violation(s)", len(violations))
 }
 
 func (l *policyLang) collectRulePolicyViolations() []policyViolation {

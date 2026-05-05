@@ -1,4 +1,4 @@
-module github.com/andyscott/gazelle_policy
+module github.com/andyscott/gazelle_fold
 
 go 1.24.0
 
