@@ -135,11 +135,12 @@ rule.name
 rule.matches_kind(patterns)
 rule.list_attr(name)
 rule.ensure_list_attr_contains(name, values)
-rule.remove_deps_matching(patterns)
+rule.deps_matching(patterns)
 
 ctx.rel
 ctx.policy_name
 ctx.params
+ctx.report_violation(message)
 ctx.matching_files(include)
 ctx.ensure_filegroup(name, srcs, public = False)
 ctx.remove_filegroup(name)
@@ -159,9 +160,10 @@ wrong types are rejected instead of silently falling through.
   not arbitrary BUILD AST mutation.
 - `required_tags` only rewrites literal string-list attrs; complex
   `select(...)`-style expressions are skipped rather than guessed at.
-- `forbidden_deps` removes direct labels from literal `deps` lists. Patterns are
-  absolute Bazel labels such as `//legacy:old` or subtree selectors such as
-  `//legacy/...`; complex `deps` expressions are skipped rather than guessed at.
+- `forbidden_deps` reports direct labels from literal `deps` lists and fails the
+  Gazelle run before files are written. Patterns are absolute Bazel labels such
+  as `//legacy:old` or subtree selectors such as `//legacy/...`; non-literal
+  `deps` expressions fail closed because they cannot be validated safely.
 - Recursive rollups are deliberately conservative: if a selective Gazelle run
   has not covered every relevant child package, ancestor recursive outputs are
   left untouched instead of being rewritten from partial knowledge.

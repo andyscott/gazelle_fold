@@ -5,6 +5,9 @@ rust_library(
     name = "lib",
     deps = [
         ":local",
+        "//exact:bad",
+        "//legacy:old",
+        "//legacy/sub:older",
         "//safe:ok",
     ],
 )

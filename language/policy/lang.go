@@ -23,6 +23,7 @@ type policyLang struct {
 	language.BaseLifecycleManager
 	packageStates map[string]map[string]packagePolicyState
 	ruleRuns      []rulePolicyRun
+	violations    []policyViolation
 }
 
 var _ language.Language = (*policyLang)(nil)
@@ -94,7 +95,7 @@ func (l *policyLang) Fix(c *config.Config, f *rule.File) {
 			if ruleIsExempt(r, active.Activation.Name) {
 				continue
 			}
-			if err := runRulePolicy(active, f.Pkg, f.Path, r); err != nil {
+			if err := runRulePolicy(active, f.Pkg, f.Path, r, nil); err != nil {
 				log.Printf("%s: policy %q on %s %q: %v", f.Path, active.Activation.Name, r.Kind(), r.Name(), err)
 			}
 		}
@@ -144,18 +145,51 @@ func (l *policyLang) GenerateRules(args language.GenerateArgs) language.Generate
 }
 
 func (l *policyLang) AfterResolvingDeps(_ context.Context) {
+	violations := l.collectRulePolicyViolations()
+	if len(violations) == 0 {
+		return
+	}
+	for _, violation := range violations {
+		log.Print(violation)
+	}
+	log.Fatalf("gazelle_policy: %d policy violation(s)", len(violations))
+}
+
+func (l *policyLang) collectRulePolicyViolations() []policyViolation {
+	l.violations = nil
 	for _, run := range l.ruleRuns {
 		for _, active := range run.policies {
 			for _, r := range run.file.Rules {
 				if ruleIsExempt(r, active.Activation.Name) {
 					continue
 				}
-				if err := runRulePolicy(active, run.file.Pkg, run.file.Path, r); err != nil {
+				if err := runRulePolicy(active, run.file.Pkg, run.file.Path, r, l.recordViolation); err != nil {
 					log.Printf("%s: policy %q on %s %q: %v", run.file.Path, active.Activation.Name, r.Kind(), r.Name(), err)
 				}
 			}
 		}
 	}
+	sort.SliceStable(l.violations, func(i, j int) bool {
+		left := l.violations[i]
+		right := l.violations[j]
+		switch {
+		case left.File != right.File:
+			return left.File < right.File
+		case left.PolicyName != right.PolicyName:
+			return left.PolicyName < right.PolicyName
+		case left.RuleKind != right.RuleKind:
+			return left.RuleKind < right.RuleKind
+		case left.RuleName != right.RuleName:
+			return left.RuleName < right.RuleName
+		default:
+			return left.Message < right.Message
+		}
+	})
+	return append([]policyViolation(nil), l.violations...)
+}
+
+func (l *policyLang) recordViolation(violation policyViolation) {
+	l.violations = append(l.violations, violation)
 }
 
 type effectivePolicy struct {
@@ -419,42 +453,31 @@ func parseDepPattern(raw string) (depPattern, error) {
 	return depPattern{exact: &exact}, nil
 }
 
-func removeDepsMatching(file string, r *rule.Rule, pkg string, rawPatterns []string) error {
+func depsMatching(file string, r *rule.Rule, pkg string, rawPatterns []string) ([]string, bool, error) {
 	if r.Attr("deps") == nil || len(rawPatterns) == 0 {
-		return nil
+		return nil, true, nil
 	}
 	current, ok := literalStringListAttr(r.Attr("deps"))
 	if !ok {
-		log.Printf("%s: skipping %s %q because deps is not a literal string list", file, r.Kind(), r.Name())
-		return nil
+		return nil, false, nil
 	}
 	patterns, err := parseDepPatterns(rawPatterns)
 	if err != nil {
-		return err
+		return nil, true, err
 	}
 
-	updated := make([]string, 0, len(current))
+	var matched []string
 	for _, dep := range current {
 		parsed, err := label.Parse(dep)
 		if err != nil {
-			log.Printf("%s: keeping unparsable dep %q on %s %q: %v", file, dep, r.Kind(), r.Name(), err)
-			updated = append(updated, dep)
+			log.Printf("%s: skipping unparsable dep %q on %s %q: %v", file, dep, r.Kind(), r.Name(), err)
 			continue
 		}
 		if depMatchesAnyPattern(parsed.Abs("", pkg), patterns) {
-			continue
+			matched = append(matched, dep)
 		}
-		updated = append(updated, dep)
 	}
-	if len(updated) == len(current) {
-		return nil
-	}
-	if len(updated) == 0 {
-		r.DelAttr("deps")
-		return nil
-	}
-	r.SetAttr("deps", updated)
-	return nil
+	return matched, true, nil
 }
 
 func depMatchesAnyPattern(dep label.Label, patterns []depPattern) bool {

@@ -6,9 +6,13 @@ def forbidden_deps_policy(name, kinds = None, deny = None):
         active_kinds = ctx.params["kinds"] if kinds == None else kinds
         if not rule.matches_kind(active_kinds):
             return
-        rule.remove_deps_matching(
+        denied = rule.deps_matching(
             patterns = ctx.params.get("deny", deny),
         )
+        if denied == None:
+            ctx.report_violation("cannot validate forbidden deps because deps is not a literal string list")
+        elif denied:
+            ctx.report_violation("forbidden deps: " + ", ".join(denied))
 
     params = {}
     if deny == None:

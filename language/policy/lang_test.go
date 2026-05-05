@@ -1,9 +1,9 @@
 package policy
 
 import (
-	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/bazelbuild/bazel-gazelle/config"
@@ -162,6 +162,27 @@ func TestLoadPolicyFileSupportsBuiltinForbiddenDepsPolicy(t *testing.T) {
 	}
 }
 
+func TestRuleValueExposesValidationOnlyDepsAPI(t *testing.T) {
+	value := &ruleValue{}
+	if got, want := value.AttrNames(), []string{
+		"kind",
+		"name",
+		"matches_kind",
+		"list_attr",
+		"ensure_list_attr_contains",
+		"deps_matching",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rule attrs = %#v, want %#v", got, want)
+	}
+	attr, err := value.Attr("remove_deps_matching")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attr != nil {
+		t.Fatalf("remove_deps_matching attr = %#v, want nil", attr)
+	}
+}
+
 func TestDefinitionRejectsUnknownParams(t *testing.T) {
 	definitions, err := loadPolicyFile(t.TempDir(), "", "std:policies/required_tags.star")
 	if err != nil {
@@ -212,7 +233,7 @@ rust_library(name = "fix")
 	}
 }
 
-func TestForbiddenDepsRemovesExactAndSubtreeMatches(t *testing.T) {
+func TestForbiddenDepsReportsExactAndSubtreeMatches(t *testing.T) {
 	f, err := rule.LoadData("BUILD.bazel", "legacy", []byte(`
 rust_library(
     name = "lib",
@@ -244,8 +265,18 @@ rust_library(
 
 	lang := NewLanguage().(*policyLang)
 	lang.Fix(c, f)
-	if got := f.Rules[0].AttrStrings("deps"); len(got) != 1 || got[0] != "//safe:ok" {
-		t.Fatalf("deps after Fix = %v, want [//safe:ok]", got)
+	violations := lang.collectRulePolicyViolations()
+	if got, want := violations, []policyViolation{{
+		File:       "BUILD.bazel",
+		PolicyName: "forbidden_deps",
+		RuleKind:   "rust_library",
+		RuleName:   "lib",
+		Message:    "forbidden deps: :local_bad, //legacy/sub:bad",
+	}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("violations = %#v, want %#v", got, want)
+	}
+	if got := f.Rules[0].AttrStrings("deps"); len(got) != 3 {
+		t.Fatalf("deps after policy = %v, want original deps preserved", got)
 	}
 }
 
@@ -278,10 +309,57 @@ rust_library(
 	lang := NewLanguage().(*policyLang)
 	lang.Fix(c, f)
 	f.Rules[0].SetAttr("deps", []string{"//safe:ok", "//legacy:bad"})
-	lang.AfterResolvingDeps(context.Background())
+	violations := lang.collectRulePolicyViolations()
+	if got, want := violations, []policyViolation{{
+		File:       "BUILD.bazel",
+		PolicyName: "forbidden_deps",
+		RuleKind:   "rust_library",
+		RuleName:   "lib",
+		Message:    "forbidden deps: //legacy:bad",
+	}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("violations = %#v, want %#v", got, want)
+	}
+}
 
-	if got := f.Rules[0].AttrStrings("deps"); len(got) != 1 || got[0] != "//safe:ok" {
-		t.Fatalf("deps after AfterResolvingDeps = %v, want [//safe:ok]", got)
+func TestForbiddenDepsFailsClosedForNonLiteralDeps(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "app", []byte(`
+rust_library(
+    name = "lib",
+    deps = select({
+        "//conditions:default": ["//legacy:bad"],
+    }),
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	definitions, err := loadPolicyFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := newPolicyConfig()
+	cfg.Definitions = definitions
+	scope, _ := parseScope("...")
+	cfg.addActivation("forbidden_deps", "", scope, map[string]any{
+		"kinds": []string{"rust_library"},
+		"deny":  []string{"//legacy/..."},
+	})
+	c := config.New()
+	c.Exts[configKey] = cfg
+
+	lang := NewLanguage().(*policyLang)
+	lang.Fix(c, f)
+	violations := lang.collectRulePolicyViolations()
+	if got, want := violations, []policyViolation{{
+		File:       "BUILD.bazel",
+		PolicyName: "forbidden_deps",
+		RuleKind:   "rust_library",
+		RuleName:   "lib",
+		Message:    "cannot validate forbidden deps because deps is not a literal string list",
+	}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("violations = %#v, want %#v", got, want)
 	}
 }
 

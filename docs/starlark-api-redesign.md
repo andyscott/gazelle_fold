@@ -142,13 +142,14 @@ def apply(ctx, rule):
 ctx.rel
 ctx.policy_name
 ctx.params
+ctx.report_violation(message)
 
 rule.kind
 rule.name
 rule.matches_kind(patterns)
 rule.list_attr(name)
 rule.ensure_list_attr_contains(name, values)
-rule.remove_deps_matching(patterns)
+rule.deps_matching(patterns)
 ```
 
 Matching is intentionally an activation-time concern, not a registration-time
@@ -243,10 +244,12 @@ def forbidden_deps_policy(name, kinds = None, deny = None):
     ...
 ```
 
-This removes direct dependency labels from literal `deps` lists. `deny` accepts
-absolute label patterns such as `//legacy:old` and package-subtree patterns such
-as `//legacy/...`. The host normalizes relative deps before matching so `:old`
-inside package `legacy` is covered by `//legacy/...`.
+This reports direct dependency labels from literal `deps` lists and fails the
+Gazelle run before files are written. `deny` accepts absolute label patterns such
+as `//legacy:old` and package-subtree patterns such as `//legacy/...`. The host
+normalizes relative deps before matching so `:old` inside package `legacy` is
+covered by `//legacy/...`. Non-literal `deps` expressions fail closed because the
+host cannot validate them safely.
 
 ## Why `mirror_attr` should still be separate
 

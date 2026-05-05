@@ -11,7 +11,7 @@ import (
 	"go.starlark.net/starlark"
 )
 
-func runRulePolicy(active effectivePolicy, rel, file string, r *rule.Rule) error {
+func runRulePolicy(active effectivePolicy, rel, file string, r *rule.Rule, reportViolation func(policyViolation)) error {
 	params, err := active.normalizedParams()
 	if err != nil {
 		return err
@@ -21,9 +21,13 @@ func runRulePolicy(active effectivePolicy, rel, file string, r *rule.Rule) error
 		active.Definition.Apply,
 		starlark.Tuple{
 			&ruleContextValue{
-				rel:        rel,
-				policyName: active.Activation.Name,
-				params:     params,
+				rel:             rel,
+				policyName:      active.Activation.Name,
+				params:          params,
+				file:            file,
+				ruleKind:        r.Kind(),
+				ruleName:        r.Name(),
+				reportViolation: reportViolation,
 			},
 			&ruleValue{
 				file: file,
@@ -47,9 +51,13 @@ func runPackagePolicy(active effectivePolicy, ctx *packageContextValue) error {
 }
 
 type ruleContextValue struct {
-	rel        string
-	policyName string
-	params     *starlark.Dict
+	rel             string
+	policyName      string
+	params          *starlark.Dict
+	file            string
+	ruleKind        string
+	ruleName        string
+	reportViolation func(policyViolation)
 }
 
 func (*ruleContextValue) String() string       { return "rule_policy_context" }
@@ -68,13 +76,15 @@ func (ctx *ruleContextValue) Attr(name string) (starlark.Value, error) {
 		return starlark.String(ctx.policyName), nil
 	case "params":
 		return ctx.params, nil
+	case "report_violation":
+		return ruleContextReportViolation.BindReceiver(ctx), nil
 	default:
 		return nil, nil
 	}
 }
 
 func (*ruleContextValue) AttrNames() []string {
-	return []string{"rel", "policy_name", "params"}
+	return []string{"rel", "policy_name", "params", "report_violation"}
 }
 
 type ruleValue struct {
@@ -101,16 +111,37 @@ func (r *ruleValue) Attr(name string) (starlark.Value, error) {
 		return ruleListAttr.BindReceiver(r), nil
 	case "ensure_list_attr_contains":
 		return ruleEnsureListAttrContains.BindReceiver(r), nil
-	case "remove_deps_matching":
-		return ruleRemoveDepsMatching.BindReceiver(r), nil
+	case "deps_matching":
+		return ruleDepsMatching.BindReceiver(r), nil
 	default:
 		return nil, nil
 	}
 }
 
 func (*ruleValue) AttrNames() []string {
-	return []string{"kind", "name", "matches_kind", "list_attr", "ensure_list_attr_contains", "remove_deps_matching"}
+	return []string{"kind", "name", "matches_kind", "list_attr", "ensure_list_attr_contains", "deps_matching"}
 }
+
+var ruleContextReportViolation = starlark.NewBuiltin("report_violation", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	self := fn.Receiver().(*ruleContextValue)
+	var message string
+	if err := starlark.UnpackArgs("report_violation", args, kwargs, "message", &message); err != nil {
+		return nil, err
+	}
+	if message == "" {
+		return nil, fmt.Errorf("report_violation message must not be empty")
+	}
+	if self.reportViolation != nil {
+		self.reportViolation(policyViolation{
+			File:       self.file,
+			PolicyName: self.policyName,
+			RuleKind:   self.ruleKind,
+			RuleName:   self.ruleName,
+			Message:    message,
+		})
+	}
+	return starlark.None, nil
+})
 
 var ruleMatchesKind = starlark.NewBuiltin("matches_kind", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	self := fn.Receiver().(*ruleValue)
@@ -158,20 +189,24 @@ var ruleEnsureListAttrContains = starlark.NewBuiltin("ensure_list_attr_contains"
 	return starlark.None, nil
 })
 
-var ruleRemoveDepsMatching = starlark.NewBuiltin("remove_deps_matching", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+var ruleDepsMatching = starlark.NewBuiltin("deps_matching", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	self := fn.Receiver().(*ruleValue)
 	var patterns starlark.Value
-	if err := starlark.UnpackArgs("remove_deps_matching", args, kwargs, "patterns", &patterns); err != nil {
+	if err := starlark.UnpackArgs("deps_matching", args, kwargs, "patterns", &patterns); err != nil {
 		return nil, err
 	}
-	values, err := readStringSequence("remove_deps_matching.patterns", patterns)
+	values, err := readStringSequence("deps_matching.patterns", patterns)
 	if err != nil {
 		return nil, err
 	}
-	if err := removeDepsMatching(self.file, self.rule, self.pkg, values); err != nil {
+	matched, supported, err := depsMatching(self.file, self.rule, self.pkg, values)
+	if err != nil {
 		return nil, err
 	}
-	return starlark.None, nil
+	if !supported {
+		return starlark.None, nil
+	}
+	return stringList(matched), nil
 })
 
 type packageContextValue struct {
