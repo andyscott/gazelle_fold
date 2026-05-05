@@ -27,8 +27,13 @@ jobs:
           repository-cache: true
           cache-save: ${{ github.event_name != 'pull_request' }}
 
+      - name: Verify MODULE.bazel is tidy
+        run: |
+          bazel mod tidy
+          git diff --exit-code -- MODULE.bazel MODULE.bazel.lock
+
       - name: Test
-        run: bazel test //...
+        run: bazel test --lockfile_mode=error //...
 
       - name: Verify generated BUILD files
-        run: bazel run //:gazelle_ci
+        run: bazel run --lockfile_mode=error //:gazelle_ci
