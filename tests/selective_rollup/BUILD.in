@@ -1,0 +1,8 @@
+# gazelle:policy import("std:policies/file_rollup.star")
+# gazelle:policy use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+
+filegroup(
+    name = "all_sources_recursive",
+    srcs = [":legacy_shape"],
+    visibility = ["//visibility:public"],
+)

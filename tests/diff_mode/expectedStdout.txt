@@ -1,0 +1,22 @@
+--- BUILD.bazel	1970-01-01 00:00:00.000000001 +0000
++++ BUILD.bazel	1970-01-01 00:00:00.000000001 +0000
+@@ -6,4 +6,19 @@
+ rust_library(
+     name = "lib",
+     srcs = ["lib.rs"],
++    tags = ["team:runtime"],
+ )
++
++filegroup(
++    name = "all_sources",
++    srcs = [
++        "BUILD.bazel",
++        "lib.rs",
++    ],
++)
++
++filegroup(
++    name = "all_sources_recursive",
++    srcs = [":all_sources"],
++    visibility = ["//visibility:public"],
++)

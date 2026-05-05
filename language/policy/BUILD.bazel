@@ -1,0 +1,42 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "policy",
+    srcs = [
+        "builtin_modules.go",
+        "directives.go",
+        "lang.go",
+        "runtime.go",
+        "scope.go",
+        "starlark.go",
+        "types.go",
+    ],
+    embedsrcs = [
+        "builtins/lib/file_rollup.star",
+        "builtins/lib/required_tags.star",
+        "builtins/policies/file_rollup.star",
+        "builtins/policies/required_tags.star",
+    ],
+    importpath = "github.com/andyscott/gazelle_policy/language/policy",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_bazelbuild_buildtools//build",
+        "@com_github_bmatcuk_doublestar_v4//:doublestar",
+        "@gazelle//config",
+        "@gazelle//language",
+        "@gazelle//rule",
+        "@net_starlark_go//starlark",
+        "@net_starlark_go//starlarkstruct",
+        "@net_starlark_go//syntax",
+    ],
+)
+
+go_test(
+    name = "policy_test",
+    srcs = ["lang_test.go"],
+    embed = [":policy"],
+    deps = [
+        "@gazelle//config",
+        "@gazelle//rule",
+    ],
+)

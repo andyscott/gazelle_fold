@@ -1,0 +1,15 @@
+# gazelle:policy import("std:policies/required_tags.star")
+# gazelle:policy import("std:policies/file_rollup.star")
+# gazelle:policy use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:root"])
+# gazelle:policy use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+
+rust_library(
+    name = "root_lib",
+    srcs = ["root.rs"],
+)
+
+# gazelle:policy exempt("required_tags", reason = "vendored target")
+rust_library(
+    name = "vendored_lib",
+    srcs = ["vendored.rs"],
+)

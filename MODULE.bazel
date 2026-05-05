@@ -1,0 +1,20 @@
+module(
+    name = "gazelle_policy",
+)
+
+bazel_dep(name = "gazelle", version = "0.45.0")
+bazel_dep(name = "rules_go", version = "0.59.0", repo_name = "io_bazel_rules_go")
+
+go_sdk = use_extension("@io_bazel_rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.download(version = "1.24.12")
+use_repo(go_sdk, go_sdk = "go_default_sdk")
+
+go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_mod = "//:go.mod")
+use_repo(
+    go_deps,
+    "bazel_gazelle_go_repository_config",
+    "com_github_bazelbuild_buildtools",
+    "com_github_bmatcuk_doublestar_v4",
+    "net_starlark_go",
+)

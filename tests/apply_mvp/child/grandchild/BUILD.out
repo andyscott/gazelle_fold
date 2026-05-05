@@ -1,0 +1,19 @@
+rust_library(
+    name = "grandchild_lib",
+    srcs = ["lib.rs"],
+    tags = ["team:root"],
+)
+
+filegroup(
+    name = "all_sources",
+    srcs = [
+        "BUILD.bazel",
+        "lib.rs",
+    ],
+)
+
+filegroup(
+    name = "all_sources_recursive",
+    srcs = [":all_sources"],
+    visibility = ["//visibility:public"],
+)

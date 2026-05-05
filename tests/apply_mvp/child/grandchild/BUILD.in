@@ -1,0 +1,4 @@
+rust_library(
+    name = "grandchild_lib",
+    srcs = ["lib.rs"],
+)

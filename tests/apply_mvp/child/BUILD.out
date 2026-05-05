@@ -1,0 +1,24 @@
+# gazelle:policy use("required_tags", scope = ".", tags = ["team:child"])
+
+rust_library(
+    name = "child_lib",
+    srcs = ["lib.rs"],
+    tags = ["team:child"],
+)
+
+filegroup(
+    name = "all_sources",
+    srcs = [
+        "BUILD.bazel",
+        "lib.rs",
+    ],
+)
+
+filegroup(
+    name = "all_sources_recursive",
+    srcs = [
+        ":all_sources",
+        "//child/grandchild:all_sources_recursive",
+    ],
+    visibility = ["//visibility:public"],
+)
