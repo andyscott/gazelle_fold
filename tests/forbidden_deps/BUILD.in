@@ -2,12 +2,9 @@
 # gazelle:policy use("forbidden_deps", scope = "...", kinds = ["rust_library"], deny = ["//legacy/...", "//exact:bad"])
 
 rust_library(
-    name = "lib",
+    name = "root_lib",
     deps = [
         ":local",
-        "//exact:bad",
-        "//legacy:old",
-        "//legacy/sub:older",
         "//safe:ok",
     ],
 )
