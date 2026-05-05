@@ -8,11 +8,13 @@ The golden path is intentionally short:
 ```python
 # gazelle:policy import("std:policies/required_tags.star")
 # gazelle:policy import("std:policies/file_rollup.star")
+# gazelle:policy import("std:policies/forbidden_deps.star")
 # gazelle:policy use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
 # gazelle:policy use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:policy use("forbidden_deps", scope = "app/...", kinds = ["rust_library"], deny = ["//legacy/..."])
 ```
 
-Those two imports load stock policies from the bundled `std` mount. `use(...)`
+Those imports load stock policies from the bundled `std` mount. `use(...)`
 activates them for a relative package scope and supplies their parameters.
 Closer activations layer over farther ones, so a child package can override only
 the parameter it cares about:
@@ -65,6 +67,7 @@ Stock policies are importable entrypoints:
 ```python
 std:policies/required_tags.star
 std:policies/file_rollup.star
+std:policies/forbidden_deps.star
 ```
 
 If you want repo-specific names or defaults, load the bundled helper library
@@ -72,6 +75,7 @@ from your own `.star` entrypoint:
 
 ```python
 load("std:lib/file_rollup.star", "file_rollup_policy")
+load("std:lib/forbidden_deps.star", "forbidden_deps_policy")
 load("std:lib/required_tags.star", "required_tags_policy")
 
 required_tags_policy(
@@ -84,6 +88,12 @@ file_rollup_policy(
     local_name = "all_sources",
     recursive_name = "all_sources_recursive",
     include = ["*.rs", "BUILD.bazel"],
+)
+
+forbidden_deps_policy(
+    name = "rust_forbidden_deps",
+    kinds = ["rust_library", "rust_binary", "rust_test"],
+    deny = ["//legacy/..."],
 )
 ```
 
@@ -125,10 +135,12 @@ rule.name
 rule.matches_kind(patterns)
 rule.list_attr(name)
 rule.ensure_list_attr_contains(name, values)
+rule.deps_matching(patterns)
 
 ctx.rel
 ctx.policy_name
 ctx.params
+ctx.report_violation(message)
 ctx.matching_files(include)
 ctx.ensure_filegroup(name, srcs, public = False)
 ctx.remove_filegroup(name)
@@ -148,6 +160,10 @@ wrong types are rejected instead of silently falling through.
   not arbitrary BUILD AST mutation.
 - `required_tags` only rewrites literal string-list attrs; complex
   `select(...)`-style expressions are skipped rather than guessed at.
+- `forbidden_deps` reports direct labels from literal `deps` lists and fails the
+  Gazelle run before files are written. Patterns are absolute Bazel labels such
+  as `//legacy:old` or subtree selectors such as `//legacy/...`; non-literal
+  `deps` expressions fail closed because they cannot be validated safely.
 - Recursive rollups are deliberately conservative: if a selective Gazelle run
   has not covered every relevant child package, ancestor recursive outputs are
   left untouched instead of being rewritten from partial knowledge.

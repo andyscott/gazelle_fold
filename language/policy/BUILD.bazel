@@ -13,8 +13,10 @@ go_library(
     ],
     embedsrcs = [
         "builtins/lib/file_rollup.star",
+        "builtins/lib/forbidden_deps.star",
         "builtins/lib/required_tags.star",
         "builtins/policies/file_rollup.star",
+        "builtins/policies/forbidden_deps.star",
         "builtins/policies/required_tags.star",
     ],
     importpath = "github.com/andyscott/gazelle_policy/language/policy",
@@ -23,6 +25,7 @@ go_library(
         "@com_github_bazelbuild_buildtools//build",
         "@com_github_bmatcuk_doublestar_v4//:doublestar",
         "@gazelle//config",
+        "@gazelle//label",
         "@gazelle//language",
         "@gazelle//rule",
         "@net_starlark_go//starlark",

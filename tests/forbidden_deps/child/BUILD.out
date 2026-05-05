@@ -1,0 +1,7 @@
+rust_library(
+    name = "child_lib",
+    deps = [
+        "//legacy:old",
+        "//safe:ok",
+    ],
+)

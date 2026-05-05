@@ -59,6 +59,7 @@ child can override one field without repeating the entire contract:
 ```text
 std:policies/required_tags.star
 std:policies/file_rollup.star
+std:policies/forbidden_deps.star
 ```
 
 These register generic policy names driven entirely by `use(...)` params.
@@ -68,6 +69,7 @@ These register generic policy names driven entirely by `use(...)` params.
 ```python
 load("std:lib/required_tags.star", "required_tags_policy")
 load("std:lib/file_rollup.star", "file_rollup_policy")
+load("std:lib/forbidden_deps.star", "forbidden_deps_policy")
 ```
 
 These let a repo define opinionated names and defaults without vendoring helper
@@ -84,6 +86,12 @@ file_rollup_policy(
     include = ["*.rs", "BUILD.bazel"],
     local_name = "all_sources",
     recursive_name = "all_sources_recursive",
+)
+
+forbidden_deps_policy(
+    name = "rust_forbidden_deps",
+    kinds = ["rust_library", "rust_binary", "rust_test"],
+    deny = ["//legacy/..."],
 )
 ```
 
@@ -134,12 +142,14 @@ def apply(ctx, rule):
 ctx.rel
 ctx.policy_name
 ctx.params
+ctx.report_violation(message)
 
 rule.kind
 rule.name
 rule.matches_kind(patterns)
 rule.list_attr(name)
 rule.ensure_list_attr_contains(name, values)
+rule.deps_matching(patterns)
 ```
 
 Matching is intentionally an activation-time concern, not a registration-time
@@ -197,7 +207,7 @@ untouched instead of rebuilding them from partial knowledge.
 - parameter defaults and small compositions
 - later helpers such as `mirror_attr_policy(...)`
 
-## The two current helpers
+## The current helpers
 
 ### `required_tags_policy(...)`
 
@@ -226,6 +236,20 @@ def file_rollup_policy(name, include = None, local_name = None, recursive_name =
 
 The stock policy leaves all three fields to `use(...)`. Repo-owned helper calls
 can bake them in as defaults.
+
+### `forbidden_deps_policy(...)`
+
+```python
+def forbidden_deps_policy(name, kinds = None, deny = None):
+    ...
+```
+
+This reports direct dependency labels from literal `deps` lists and fails the
+Gazelle run before files are written. `deny` accepts absolute label patterns such
+as `//legacy:old` and package-subtree patterns such as `//legacy/...`. The host
+normalizes relative deps before matching so `:old` inside package `legacy` is
+covered by `//legacy/...`. Non-literal `deps` expressions fail closed because the
+host cannot validate them safely.
 
 ## Why `mirror_attr` should still be separate
 

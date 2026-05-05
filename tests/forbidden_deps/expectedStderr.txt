@@ -1,0 +1,3 @@
+gazelle: %WORKSPACEPATH%/child/BUILD.bazel: policy "forbidden_deps" on rust_library "child_lib": forbidden deps: //legacy:old
+gazelle: %WORKSPACEPATH%/child/grandchild/BUILD.bazel: policy "forbidden_deps" on rust_library "grandchild_lib": forbidden deps: //exact:bad, //legacy/sub:older
+gazelle: gazelle_policy: 2 policy violation(s)

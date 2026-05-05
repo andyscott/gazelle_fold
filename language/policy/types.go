@@ -1,6 +1,8 @@
 package policy
 
 import (
+	"fmt"
+
 	"github.com/bazelbuild/bazel-gazelle/rule"
 	"go.starlark.net/starlark"
 )
@@ -58,6 +60,25 @@ type packagePolicyState struct {
 	Generated bool
 	Complete  bool
 	Exports   map[string]string
+}
+
+type policyViolation struct {
+	File       string
+	PolicyName string
+	RuleKind   string
+	RuleName   string
+	Message    string
+}
+
+func (v policyViolation) String() string {
+	return fmt.Sprintf(
+		"%s: policy %q on %s %q: %s",
+		v.File,
+		v.PolicyName,
+		v.RuleKind,
+		v.RuleName,
+		v.Message,
+	)
 }
 
 func newPolicyConfig() *policyConfig {
