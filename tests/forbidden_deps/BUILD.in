@@ -1,0 +1,13 @@
+# gazelle:policy import("std:policies/forbidden_deps.star")
+# gazelle:policy use("forbidden_deps", scope = "...", kinds = ["rust_library"], deny = ["//legacy/...", "//exact:bad"])
+
+rust_library(
+    name = "lib",
+    deps = [
+        ":local",
+        "//exact:bad",
+        "//legacy:old",
+        "//legacy/sub:older",
+        "//safe:ok",
+    ],
+)

@@ -1,0 +1,25 @@
+"""Helpers for direct-dependency policies."""
+
+
+def forbidden_deps_policy(name, kinds = None, deny = None):
+    def _apply(ctx, rule):
+        active_kinds = ctx.params["kinds"] if kinds == None else kinds
+        if not rule.matches_kind(active_kinds):
+            return
+        rule.remove_deps_matching(
+            patterns = ctx.params.get("deny", deny),
+        )
+
+    params = {}
+    if deny == None:
+        params["deny"] = gazelle_policy.param(type = "strings", required = True)
+    else:
+        params["deny"] = gazelle_policy.param(type = "strings", default = deny)
+    if kinds == None:
+        params["kinds"] = gazelle_policy.param(type = "strings", required = True)
+
+    gazelle_policy.rule_policy(
+        name = name,
+        params = params,
+        apply = _apply,
+    )

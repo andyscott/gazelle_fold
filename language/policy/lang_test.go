@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -147,6 +148,20 @@ func TestLoadPolicyFileSupportsBuiltinPolicies(t *testing.T) {
 	}
 }
 
+func TestLoadPolicyFileSupportsBuiltinForbiddenDepsPolicy(t *testing.T) {
+	definitions, err := loadPolicyFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, ok := definitions["forbidden_deps"]
+	if !ok {
+		t.Fatal("built-in forbidden_deps policy was not registered")
+	}
+	if !def.Params["kinds"].Required || !def.Params["deny"].Required {
+		t.Fatal("built-in forbidden_deps params should be required")
+	}
+}
+
 func TestDefinitionRejectsUnknownParams(t *testing.T) {
 	definitions, err := loadPolicyFile(t.TempDir(), "", "std:policies/required_tags.star")
 	if err != nil {
@@ -194,6 +209,79 @@ rust_library(name = "fix")
 	}
 	if got := f.Rules[1].AttrStrings("tags"); len(got) != 1 || got[0] != "team:runtime" {
 		t.Fatalf("non-exempt rule tags = %v, want team:runtime", got)
+	}
+}
+
+func TestForbiddenDepsRemovesExactAndSubtreeMatches(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "legacy", []byte(`
+rust_library(
+    name = "lib",
+    deps = [
+        ":local_bad",
+        "//legacy/sub:bad",
+        "//safe:ok",
+    ],
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	definitions, err := loadPolicyFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := newPolicyConfig()
+	cfg.Definitions = definitions
+	scope, _ := parseScope("...")
+	cfg.addActivation("forbidden_deps", "", scope, map[string]any{
+		"kinds": []string{"rust_library"},
+		"deny":  []string{"//legacy/..."},
+	})
+	c := config.New()
+	c.Exts[configKey] = cfg
+
+	lang := NewLanguage().(*policyLang)
+	lang.Fix(c, f)
+	if got := f.Rules[0].AttrStrings("deps"); len(got) != 1 || got[0] != "//safe:ok" {
+		t.Fatalf("deps after Fix = %v, want [//safe:ok]", got)
+	}
+}
+
+func TestRulePoliciesRunAgainAfterDependencyResolution(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "app", []byte(`
+rust_library(
+    name = "lib",
+    deps = ["//safe:ok"],
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	definitions, err := loadPolicyFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := newPolicyConfig()
+	cfg.Definitions = definitions
+	scope, _ := parseScope("...")
+	cfg.addActivation("forbidden_deps", "", scope, map[string]any{
+		"kinds": []string{"rust_library"},
+		"deny":  []string{"//legacy/..."},
+	})
+	c := config.New()
+	c.Exts[configKey] = cfg
+
+	lang := NewLanguage().(*policyLang)
+	lang.Fix(c, f)
+	f.Rules[0].SetAttr("deps", []string{"//safe:ok", "//legacy:bad"})
+	lang.AfterResolvingDeps(context.Background())
+
+	if got := f.Rules[0].AttrStrings("deps"); len(got) != 1 || got[0] != "//safe:ok" {
+		t.Fatalf("deps after AfterResolvingDeps = %v, want [//safe:ok]", got)
 	}
 }
 

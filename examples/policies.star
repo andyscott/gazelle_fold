@@ -1,4 +1,5 @@
 load("std:lib/file_rollup.star", "file_rollup_policy")
+load("std:lib/forbidden_deps.star", "forbidden_deps_policy")
 load("std:lib/required_tags.star", "required_tags_policy")
 
 required_tags_policy(
@@ -11,4 +12,10 @@ file_rollup_policy(
     local_name = "all_sources",
     recursive_name = "all_sources_recursive",
     include = ["*.rs", "BUILD.bazel"],
+)
+
+forbidden_deps_policy(
+    name = "rust_forbidden_deps",
+    kinds = ["rust_library", "rust_binary", "rust_test"],
+    deny = ["//legacy/..."],
 )

@@ -27,6 +27,7 @@ func runRulePolicy(active effectivePolicy, rel, file string, r *rule.Rule) error
 			},
 			&ruleValue{
 				file: file,
+				pkg:  rel,
 				rule: r,
 			},
 		},
@@ -78,6 +79,7 @@ func (*ruleContextValue) AttrNames() []string {
 
 type ruleValue struct {
 	file string
+	pkg  string
 	rule *rule.Rule
 }
 
@@ -99,13 +101,15 @@ func (r *ruleValue) Attr(name string) (starlark.Value, error) {
 		return ruleListAttr.BindReceiver(r), nil
 	case "ensure_list_attr_contains":
 		return ruleEnsureListAttrContains.BindReceiver(r), nil
+	case "remove_deps_matching":
+		return ruleRemoveDepsMatching.BindReceiver(r), nil
 	default:
 		return nil, nil
 	}
 }
 
 func (*ruleValue) AttrNames() []string {
-	return []string{"kind", "name", "matches_kind", "list_attr", "ensure_list_attr_contains"}
+	return []string{"kind", "name", "matches_kind", "list_attr", "ensure_list_attr_contains", "remove_deps_matching"}
 }
 
 var ruleMatchesKind = starlark.NewBuiltin("matches_kind", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -151,6 +155,22 @@ var ruleEnsureListAttrContains = starlark.NewBuiltin("ensure_list_attr_contains"
 		return nil, err
 	}
 	ensureListAttrContains(self.file, self.rule, name, required)
+	return starlark.None, nil
+})
+
+var ruleRemoveDepsMatching = starlark.NewBuiltin("remove_deps_matching", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	self := fn.Receiver().(*ruleValue)
+	var patterns starlark.Value
+	if err := starlark.UnpackArgs("remove_deps_matching", args, kwargs, "patterns", &patterns); err != nil {
+		return nil, err
+	}
+	values, err := readStringSequence("remove_deps_matching.patterns", patterns)
+	if err != nil {
+		return nil, err
+	}
+	if err := removeDepsMatching(self.file, self.rule, self.pkg, values); err != nil {
+		return nil, err
+	}
 	return starlark.None, nil
 })
 
