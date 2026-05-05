@@ -1,0 +1,11 @@
+module(
+    name = "gazelle_fold_bzlmod_example",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "gazelle", version = "0.50.0")
+bazel_dep(name = "gazelle_fold", version = "0.1.0")
+local_path_override(
+    module_name = "gazelle_fold",
+    path = "../..",
+)

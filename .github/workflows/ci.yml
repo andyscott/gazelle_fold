@@ -37,3 +37,11 @@ jobs:
 
       - name: Verify generated BUILD files
         run: bazel run --lockfile_mode=error //:gazelle_ci
+
+      - name: Test downstream Bzlmod example
+        working-directory: examples/bzlmod
+        run: |
+          bazel mod tidy
+          git diff --exit-code -- MODULE.bazel
+          bazel build @gazelle_fold//:gazelle_fold
+          bazel test //...

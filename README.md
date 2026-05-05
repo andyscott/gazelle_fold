@@ -114,6 +114,16 @@ Each package contributes only its local files and the exports from its direct
 children. The recursive target emerges from the fold instead of one giant
 repo-wide declaration.
 
+## Install
+
+After `gazelle_fold` is published to the Bazel Central Registry, add it beside
+Gazelle in your root module:
+
+```python
+bazel_dep(name = "gazelle", version = "0.50.0")
+bazel_dep(name = "gazelle_fold", version = "0.1.0")
+```
+
 ## Add the extension
 
 ```python
@@ -135,6 +145,10 @@ bazelisk run //:gazelle_ci
 
 The repo pins Bazel through `.bazelversion`, so use `bazelisk` for local builds
 and tests as well.
+
+For a tiny repo that consumes `gazelle_fold` as a dependency instead of as the
+root module, see [`examples/bzlmod`](examples/bzlmod). CI runs that module
+separately so the public integration path stays honest.
 
 ## Module paths
 

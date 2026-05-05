@@ -1,0 +1,2 @@
+# gazelle:fold import("std:folds/file_rollup.star")
+# gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")

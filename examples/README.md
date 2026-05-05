@@ -1,4 +1,4 @@
-# Example policies
+# Example definitions
 
 These examples show the three useful moves in `gazelle_fold`: fold child state
 into ancestor targets, modify local rules, and enforce local invariants. Most
