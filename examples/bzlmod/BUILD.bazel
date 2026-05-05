@@ -1,0 +1,28 @@
+load("@gazelle//:def.bzl", "gazelle", "gazelle_binary", "gazelle_generation_test")
+
+gazelle_binary(
+    name = "gazelle_fold",
+    languages = [
+        "@gazelle_fold//language/fold",
+        "@gazelle//language/go",
+    ],
+)
+
+gazelle(
+    name = "gazelle",
+    command = "fix",
+    gazelle = ":gazelle_fold",
+)
+
+gazelle(
+    name = "gazelle_ci",
+    command = "fix",
+    extra_args = ["-mode=diff"],
+    gazelle = ":gazelle_fold",
+)
+
+gazelle_generation_test(
+    name = "file_rollup",
+    gazelle_binary = ":gazelle_fold",
+    test_data = glob(["file_rollup/**"]),
+)

@@ -1,1 +1,3 @@
 /bazel-*
+/examples/bzlmod/bazel-*
+/examples/bzlmod/MODULE.bazel.lock
