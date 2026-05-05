@@ -1,7 +1,7 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
-    name = "policy",
+    name = "fold",
     srcs = [
         "builtin_modules.go",
         "directives.go",
@@ -15,11 +15,11 @@ go_library(
         "builtins/lib/file_rollup.star",
         "builtins/lib/forbidden_deps.star",
         "builtins/lib/required_tags.star",
-        "builtins/policies/file_rollup.star",
+        "builtins/folds/file_rollup.star",
         "builtins/policies/forbidden_deps.star",
-        "builtins/policies/required_tags.star",
+        "builtins/rewrites/required_tags.star",
     ],
-    importpath = "github.com/andyscott/gazelle_policy/language/policy",
+    importpath = "github.com/andyscott/gazelle_fold/language/fold",
     visibility = ["//visibility:public"],
     deps = [
         "@com_github_bazelbuild_buildtools//build",
@@ -35,9 +35,9 @@ go_library(
 )
 
 go_test(
-    name = "policy_test",
+    name = "fold_test",
     srcs = ["lang_test.go"],
-    embed = [":policy"],
+    embed = [":fold"],
     deps = [
         "@gazelle//config",
         "@gazelle//rule",

@@ -1,5 +1,5 @@
-# gazelle:policy import("std:policies/forbidden_deps.star")
-# gazelle:policy use("forbidden_deps", scope = "...", kinds = ["rust_library"], deny = ["//legacy/...", "//exact:bad"])
+# gazelle:fold import("std:policies/forbidden_deps.star")
+# gazelle:fold use("forbidden_deps", scope = "...", kinds = ["rust_library"], deny = ["//legacy/...", "//exact:bad"])
 
 rust_library(
     name = "root_lib",

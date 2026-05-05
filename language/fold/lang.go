@@ -1,4 +1,4 @@
-package policy
+package fold
 
 import (
 	"context"
@@ -18,44 +18,44 @@ import (
 	bzl "github.com/bazelbuild/buildtools/build"
 )
 
-type policyLang struct {
+type foldLang struct {
 	language.BaseLang
 	language.BaseLifecycleManager
-	packageStates map[string]map[string]packagePolicyState
-	ruleRuns      []rulePolicyRun
-	violations    []policyViolation
+	foldStates map[string]map[string]foldState
+	policyRuns []rulePolicyRun
+	violations []policyViolation
 }
 
-var _ language.Language = (*policyLang)(nil)
+var _ language.Language = (*foldLang)(nil)
 
-// NewLanguage is the public Gazelle integration point for gazelle_policy.
+// NewLanguage is the public Gazelle integration point for gazelle_fold.
 func NewLanguage() language.Language {
-	return &policyLang{
-		packageStates: make(map[string]map[string]packagePolicyState),
+	return &foldLang{
+		foldStates: make(map[string]map[string]foldState),
 	}
 }
 
-func (*policyLang) Name() string { return languageName }
+func (*foldLang) Name() string { return languageName }
 
-func (*policyLang) RegisterFlags(_ *flag.FlagSet, _ string, c *config.Config) {
-	c.Exts[configKey] = newPolicyConfig()
+func (*foldLang) RegisterFlags(_ *flag.FlagSet, _ string, c *config.Config) {
+	c.Exts[configKey] = newFoldConfig()
 }
 
-func (*policyLang) KnownDirectives() []string { return []string{"policy"} }
+func (*foldLang) KnownDirectives() []string { return []string{"fold"} }
 
-func (*policyLang) Configure(c *config.Config, rel string, f *rule.File) {
+func (*foldLang) Configure(c *config.Config, rel string, f *rule.File) {
 	cfg := currentConfig(c).clone()
 	c.Exts[configKey] = cfg
 	if f == nil {
 		return
 	}
 	for _, directive := range f.Directives {
-		if directive.Key != "policy" {
+		if directive.Key != "fold" {
 			continue
 		}
 		parsed, err := parseDirective(directive.Value)
 		if err != nil {
-			log.Printf("%s: invalid gazelle:policy directive %q: %v", f.Path, directive.Value, err)
+			log.Printf("%s: invalid gazelle:fold directive %q: %v", f.Path, directive.Value, err)
 			continue
 		}
 		switch parsed.Kind {
@@ -74,57 +74,58 @@ func (*policyLang) Configure(c *config.Config, rel string, f *rule.File) {
 		case directiveUse:
 			if def, ok := cfg.Definitions[parsed.Name]; ok {
 				if err := def.validateProvidedParams(parsed.Params); err != nil {
-					log.Printf("%s: policy %q: %v", f.Path, parsed.Name, err)
+					log.Printf("%s: %s %q: %v", f.Path, def.Kind, parsed.Name, err)
 					continue
 				}
 			}
 			cfg.addActivation(parsed.Name, rel, parsed.Scope, parsed.Params)
-		case directiveExempt:
+		case directiveSkip:
 			// rule.ParseDirectives currently sees comments attached to all
-			// statements. Anchored exemptions are intentionally interpreted only
-			// in Fix from the following rule's own leading comments.
+			// statements. Anchored skips are intentionally interpreted only in
+			// Fix from the following rule's own leading comments.
 		}
 	}
 }
 
-func (l *policyLang) Fix(c *config.Config, f *rule.File) {
+func (l *foldLang) Fix(c *config.Config, f *rule.File) {
 	cfg := currentConfig(c)
-	policies := effectiveRulePolicies(cfg, f.Pkg)
-	for _, active := range policies {
+	rewrites := effectiveRuleDefinitions(cfg, f.Pkg, kindRuleRewrite)
+	policies := effectiveRuleDefinitions(cfg, f.Pkg, kindRulePolicy)
+	for _, active := range append(append([]effectiveDefinition(nil), rewrites...), policies...) {
 		for _, r := range f.Rules {
-			if ruleIsExempt(r, active.Activation.Name) {
+			if ruleIsSkipped(r, active.Activation.Name) {
 				continue
 			}
-			if err := runRulePolicy(active, f.Pkg, f.Path, r, nil); err != nil {
-				log.Printf("%s: policy %q on %s %q: %v", f.Path, active.Activation.Name, r.Kind(), r.Name(), err)
+			if err := runRuleDefinition(active, f.Pkg, f.Path, r, nil); err != nil {
+				log.Printf("%s: %s %q on %s %q: %v", f.Path, active.Definition.Kind, active.Activation.Name, r.Kind(), r.Name(), err)
 			}
 		}
 	}
 	if len(policies) > 0 {
 		// Gazelle resolves generated deps after Fix. Keep the final file and
-		// re-run rule policies after that merge so policies describe the BUILD
-		// file we emit, not only the pre-generation snapshot we first saw.
-		l.ruleRuns = append(l.ruleRuns, rulePolicyRun{
+		// re-run policies after that merge so they describe the BUILD file we
+		// emit, not only the pre-generation snapshot we first saw.
+		l.policyRuns = append(l.policyRuns, rulePolicyRun{
 			file:     f,
 			policies: policies,
 		})
 	}
 }
 
-func (l *policyLang) GenerateRules(args language.GenerateArgs) language.GenerateResult {
+func (l *foldLang) GenerateRules(args language.GenerateArgs) language.GenerateResult {
 	cfg := currentConfig(args.Config)
 	var result language.GenerateResult
 	for _, active := range effectivePolicies(cfg, args.Rel) {
-		if active.Definition.Kind != kindPackagePolicy {
+		if active.Definition.Kind != kindFold {
 			continue
 		}
-		ctx, err := newPackageContextValue(l, args, active)
+		ctx, err := newFoldContextValue(l, args, active)
 		if err != nil {
-			log.Printf("%s: policy %q: %v", args.Rel, active.Activation.Name, err)
+			log.Printf("%s: fold %q: %v", args.Rel, active.Activation.Name, err)
 			continue
 		}
-		if err := runPackagePolicy(active, ctx); err != nil {
-			log.Printf("%s: policy %q: %v", args.Rel, active.Activation.Name, err)
+		if err := runFold(active, ctx); err != nil {
+			log.Printf("%s: fold %q: %v", args.Rel, active.Activation.Name, err)
 			continue
 		}
 		result.Gen = append(result.Gen, ctx.gen...)
@@ -132,10 +133,10 @@ func (l *policyLang) GenerateRules(args language.GenerateArgs) language.Generate
 		for range ctx.gen {
 			result.Imports = append(result.Imports, nil)
 		}
-		if l.packageStates[args.Rel] == nil {
-			l.packageStates[args.Rel] = make(map[string]packagePolicyState)
+		if l.foldStates[args.Rel] == nil {
+			l.foldStates[args.Rel] = make(map[string]foldState)
 		}
-		l.packageStates[args.Rel][active.Activation.Name] = packagePolicyState{
+		l.foldStates[args.Rel][active.Activation.Name] = foldState{
 			Generated: true,
 			Complete:  ctx.complete,
 			Exports:   cloneExports(ctx.exports),
@@ -144,7 +145,7 @@ func (l *policyLang) GenerateRules(args language.GenerateArgs) language.Generate
 	return result
 }
 
-func (l *policyLang) AfterResolvingDeps(_ context.Context) {
+func (l *foldLang) AfterResolvingDeps(_ context.Context) {
 	violations := l.collectRulePolicyViolations()
 	if len(violations) == 0 {
 		return
@@ -152,18 +153,18 @@ func (l *policyLang) AfterResolvingDeps(_ context.Context) {
 	for _, violation := range violations {
 		log.Print(violation)
 	}
-	log.Fatalf("gazelle_policy: %d policy violation(s)", len(violations))
+	log.Fatalf("gazelle_fold: %d policy violation(s)", len(violations))
 }
 
-func (l *policyLang) collectRulePolicyViolations() []policyViolation {
+func (l *foldLang) collectRulePolicyViolations() []policyViolation {
 	l.violations = nil
-	for _, run := range l.ruleRuns {
+	for _, run := range l.policyRuns {
 		for _, active := range run.policies {
 			for _, r := range run.file.Rules {
-				if ruleIsExempt(r, active.Activation.Name) {
+				if ruleIsSkipped(r, active.Activation.Name) {
 					continue
 				}
-				if err := runRulePolicy(active, run.file.Pkg, run.file.Path, r, l.recordViolation); err != nil {
+				if err := runRuleDefinition(active, run.file.Pkg, run.file.Path, r, l.recordViolation); err != nil {
 					log.Printf("%s: policy %q on %s %q: %v", run.file.Path, active.Activation.Name, r.Kind(), r.Name(), err)
 				}
 			}
@@ -188,18 +189,18 @@ func (l *policyLang) collectRulePolicyViolations() []policyViolation {
 	return append([]policyViolation(nil), l.violations...)
 }
 
-func (l *policyLang) recordViolation(violation policyViolation) {
+func (l *foldLang) recordViolation(violation policyViolation) {
 	l.violations = append(l.violations, violation)
 }
 
-type effectivePolicy struct {
+type effectiveDefinition struct {
 	Activation activation
 	Definition definition
 }
 
 type rulePolicyRun struct {
 	file     *rule.File
-	policies []effectivePolicy
+	policies []effectiveDefinition
 }
 
 func (d definition) validateParams(params map[string]any) error {
@@ -229,7 +230,7 @@ func (d definition) validateProvidedParams(params map[string]any) error {
 	return nil
 }
 
-func (p effectivePolicy) normalizedParams() (*starlark.Dict, error) {
+func (p effectiveDefinition) normalizedParams() (*starlark.Dict, error) {
 	if err := p.Definition.validateParams(p.Activation.Params); err != nil {
 		return nil, err
 	}
@@ -269,7 +270,7 @@ func validateDirectiveParam(name string, typ paramType, value any) error {
 	return nil
 }
 
-func effectivePolicies(cfg *policyConfig, rel string) []effectivePolicy {
+func effectivePolicies(cfg *foldConfig, rel string) []effectiveDefinition {
 	covering := make(map[string][]activation)
 	for _, act := range cfg.Activations {
 		if !act.Scope.covers(act.Origin, rel) {
@@ -282,7 +283,7 @@ func effectivePolicies(cfg *policyConfig, rel string) []effectivePolicy {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	out := make([]effectivePolicy, 0, len(names))
+	out := make([]effectiveDefinition, 0, len(names))
 	for _, name := range names {
 		def, ok := cfg.Definitions[name]
 		if !ok {
@@ -294,15 +295,15 @@ func effectivePolicies(cfg *policyConfig, rel string) []effectivePolicy {
 		})
 		winner := acts[len(acts)-1].clone()
 		winner.Params = mergedActivationParams(acts)
-		out = append(out, effectivePolicy{Activation: winner, Definition: def})
+		out = append(out, effectiveDefinition{Activation: winner, Definition: def})
 	}
 	return out
 }
 
-func effectiveRulePolicies(cfg *policyConfig, rel string) []effectivePolicy {
-	var out []effectivePolicy
+func effectiveRuleDefinitions(cfg *foldConfig, rel string, kind definitionKind) []effectiveDefinition {
+	var out []effectiveDefinition
 	for _, active := range effectivePolicies(cfg, rel) {
-		if active.Definition.Kind == kindRulePolicy {
+		if active.Definition.Kind == kind {
 			out = append(out, active)
 		}
 	}
@@ -334,11 +335,11 @@ func mergedActivationParams(acts []activation) map[string]any {
 	return merged
 }
 
-func currentConfig(c *config.Config) *policyConfig {
-	if cfg, ok := c.Exts[configKey].(*policyConfig); ok && cfg != nil {
+func currentConfig(c *config.Config) *foldConfig {
+	if cfg, ok := c.Exts[configKey].(*foldConfig); ok && cfg != nil {
 		return cfg
 	}
-	return newPolicyConfig()
+	return newFoldConfig()
 }
 
 func matchesAnyKind(patterns []string, kind string) bool {
@@ -351,9 +352,9 @@ func matchesAnyKind(patterns []string, kind string) bool {
 	return false
 }
 
-func ruleIsExempt(r *rule.Rule, policyName string) bool {
+func ruleIsSkipped(r *rule.Rule, definitionName string) bool {
 	for _, comment := range r.Comments() {
-		const prefix = "# gazelle:policy "
+		const prefix = "# gazelle:fold "
 		if !strings.HasPrefix(comment, prefix) {
 			continue
 		}
@@ -361,7 +362,7 @@ func ruleIsExempt(r *rule.Rule, policyName string) bool {
 		if err != nil {
 			continue
 		}
-		if parsed.Kind == directiveExempt && parsed.Name == policyName {
+		if parsed.Kind == directiveSkip && parsed.Name == definitionName {
 			return true
 		}
 	}

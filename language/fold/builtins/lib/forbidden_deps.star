@@ -16,13 +16,13 @@ def forbidden_deps_policy(name, kinds = None, deny = None):
 
     params = {}
     if deny == None:
-        params["deny"] = gazelle_policy.param(type = "strings", required = True)
+        params["deny"] = gazelle_fold.param(type = "strings", required = True)
     else:
-        params["deny"] = gazelle_policy.param(type = "strings", default = deny)
+        params["deny"] = gazelle_fold.param(type = "strings", default = deny)
     if kinds == None:
-        params["kinds"] = gazelle_policy.param(type = "strings", required = True)
+        params["kinds"] = gazelle_fold.param(type = "strings", required = True)
 
-    gazelle_policy.rule_policy(
+    gazelle_fold.policy(
         name = name,
         params = params,
         apply = _apply,

@@ -1,4 +1,4 @@
-package policy
+package fold
 
 import (
 	"fmt"
@@ -67,12 +67,13 @@ func newStarlarkLoader(repoRoot string) *starlarkLoader {
 		mounts:      newMountTable(repoRoot),
 	}
 	loader.predeclared = starlark.StringDict{
-		"gazelle_policy": starlarkstruct.FromStringDict(
-			starlark.String("gazelle_policy"),
+		"gazelle_fold": starlarkstruct.FromStringDict(
+			starlark.String("gazelle_fold"),
 			starlark.StringDict{
-				"param":          starlark.NewBuiltin("gazelle_policy.param", loader.paramBuiltin),
-				"rule_policy":    starlark.NewBuiltin("gazelle_policy.rule_policy", loader.rulePolicyBuiltin),
-				"package_policy": starlark.NewBuiltin("gazelle_policy.package_policy", loader.packagePolicyBuiltin),
+				"param":   starlark.NewBuiltin("gazelle_fold.param", loader.paramBuiltin),
+				"fold":    starlark.NewBuiltin("gazelle_fold.fold", loader.foldBuiltin),
+				"rewrite": starlark.NewBuiltin("gazelle_fold.rewrite", loader.rewriteBuiltin),
+				"policy":  starlark.NewBuiltin("gazelle_fold.policy", loader.policyBuiltin),
 			},
 		),
 	}
@@ -111,7 +112,7 @@ func (l *starlarkLoader) loadModule(id moduleID) (starlark.StringDict, error) {
 	key := id.String()
 	if entry, ok := l.modules[key]; ok {
 		if entry == nil {
-			return nil, fmt.Errorf("cycle in policy load graph at %q", key)
+			return nil, fmt.Errorf("cycle in fold load graph at %q", key)
 		}
 		return entry.globals, entry.err
 	}
@@ -123,7 +124,7 @@ func (l *starlarkLoader) loadModule(id moduleID) (starlark.StringDict, error) {
 
 	l.modules[key] = nil // sentinel for cycle detection while the file runs
 	thread := &starlark.Thread{
-		Name: "gazelle_policy " + key,
+		Name: "gazelle_fold " + key,
 		Load: func(_ *starlark.Thread, spec string) (starlark.StringDict, error) {
 			child, err := l.resolveModuleRef(spec, source.id)
 			if err != nil {
@@ -140,21 +141,21 @@ func (l *starlarkLoader) loadModule(id moduleID) (starlark.StringDict, error) {
 func (l *starlarkLoader) moduleSource(id moduleID) (moduleSource, error) {
 	mount, ok := l.mounts[id.Mount]
 	if !ok {
-		return moduleSource{}, fmt.Errorf("unknown policy mount %q", id.Mount)
+		return moduleSource{}, fmt.Errorf("unknown fold mount %q", id.Mount)
 	}
 	return mount.read(id)
 }
 
 func (l *starlarkLoader) resolveModuleRef(spec string, importer moduleID) (moduleID, error) {
 	if spec == "" {
-		return moduleID{}, fmt.Errorf("policy module path must not be empty")
+		return moduleID{}, fmt.Errorf("fold module path must not be empty")
 	}
 	if prefix, mountedPath, ok := strings.Cut(spec, ":"); ok {
 		if prefix == "" {
-			return moduleID{}, fmt.Errorf("policy mount prefix must not be empty in %q", spec)
+			return moduleID{}, fmt.Errorf("fold mount prefix must not be empty in %q", spec)
 		}
 		if _, exists := l.mounts[prefix]; !exists {
-			return moduleID{}, fmt.Errorf("unknown policy mount %q", prefix)
+			return moduleID{}, fmt.Errorf("unknown fold mount %q", prefix)
 		}
 		clean, err := cleanModulePath(mountedPath)
 		if err != nil {
@@ -163,7 +164,7 @@ func (l *starlarkLoader) resolveModuleRef(spec string, importer moduleID) (modul
 		return moduleID{Mount: prefix, Path: clean}, nil
 	}
 	if strings.HasPrefix(spec, "/") {
-		return moduleID{}, fmt.Errorf("relative policy module path must not start with /: %q", spec)
+		return moduleID{}, fmt.Errorf("relative fold module path must not start with /: %q", spec)
 	}
 	clean, err := cleanModulePath(path.Join(path.Dir(importer.Path), spec))
 	if err != nil {
@@ -189,7 +190,7 @@ func (l *starlarkLoader) paramBuiltin(_ *starlark.Thread, _ *starlark.Builtin, a
 		required     bool
 		defaultValue starlark.Value
 	)
-	if err := starlark.UnpackArgs("gazelle_policy.param", args, kwargs,
+	if err := starlark.UnpackArgs("gazelle_fold.param", args, kwargs,
 		"type", &typ,
 		"required?", &required,
 		"default??", &defaultValue,
@@ -201,11 +202,11 @@ func (l *starlarkLoader) paramBuiltin(_ *starlark.Thread, _ *starlark.Builtin, a
 		return nil, err
 	}
 	if required && defaultValue != nil {
-		return nil, fmt.Errorf("gazelle_policy.param cannot be both required and have a default")
+		return nil, fmt.Errorf("gazelle_fold.param cannot be both required and have a default")
 	}
 	var value any
 	if defaultValue != nil {
-		value, err = readParamValue("gazelle_policy.param.default", specType, defaultValue)
+		value, err = readParamValue("gazelle_fold.param.default", specType, defaultValue)
 		if err != nil {
 			return nil, err
 		}
@@ -217,48 +218,25 @@ func (l *starlarkLoader) paramBuiltin(_ *starlark.Thread, _ *starlark.Builtin, a
 	}}, nil
 }
 
-func (l *starlarkLoader) rulePolicyBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var (
-		name   string
-		params *starlark.Dict
-		apply  *starlark.Function
-	)
-	if err := starlark.UnpackArgs("gazelle_policy.rule_policy", args, kwargs,
-		"name", &name,
-		"params?", &params,
-		"apply", &apply,
-	); err != nil {
-		return nil, err
-	}
-	if name == "" {
-		return nil, fmt.Errorf("rule policy name must not be empty")
-	}
-	paramSpecs, err := unpackParamSpecs(params)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateCallback("rule policy", name, apply, 2); err != nil {
-		return nil, err
-	}
-	if _, exists := l.definitions[name]; exists {
-		return nil, fmt.Errorf("policy %q is already registered", name)
-	}
-	l.definitions[name] = definition{
-		Name:   name,
-		Kind:   kindRulePolicy,
-		Params: paramSpecs,
-		Apply:  apply,
-	}
-	return starlark.None, nil
+func (l *starlarkLoader) rewriteBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	return l.registerDefinition("gazelle_fold.rewrite", "rewrite", kindRuleRewrite, 2, args, kwargs)
 }
 
-func (l *starlarkLoader) packagePolicyBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (l *starlarkLoader) policyBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	return l.registerDefinition("gazelle_fold.policy", "policy", kindRulePolicy, 2, args, kwargs)
+}
+
+func (l *starlarkLoader) foldBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	return l.registerDefinition("gazelle_fold.fold", "fold", kindFold, 1, args, kwargs)
+}
+
+func (l *starlarkLoader) registerDefinition(apiName, kindName string, kind definitionKind, arity int, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		name   string
 		params *starlark.Dict
 		apply  *starlark.Function
 	)
-	if err := starlark.UnpackArgs("gazelle_policy.package_policy", args, kwargs,
+	if err := starlark.UnpackArgs(apiName, args, kwargs,
 		"name", &name,
 		"params?", &params,
 		"apply", &apply,
@@ -266,21 +244,21 @@ func (l *starlarkLoader) packagePolicyBuiltin(_ *starlark.Thread, _ *starlark.Bu
 		return nil, err
 	}
 	if name == "" {
-		return nil, fmt.Errorf("package policy name must not be empty")
+		return nil, fmt.Errorf("%s name must not be empty", kindName)
 	}
 	paramSpecs, err := unpackParamSpecs(params)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateCallback("package policy", name, apply, 1); err != nil {
+	if err := validateCallback(kindName, name, apply, arity); err != nil {
 		return nil, err
 	}
 	if _, exists := l.definitions[name]; exists {
-		return nil, fmt.Errorf("policy %q is already registered", name)
+		return nil, fmt.Errorf("definition %q is already registered", name)
 	}
 	l.definitions[name] = definition{
 		Name:   name,
-		Kind:   kindPackagePolicy,
+		Kind:   kind,
 		Params: paramSpecs,
 		Apply:  apply,
 	}
@@ -308,7 +286,7 @@ func unpackParamSpecs(dict *starlark.Dict) (map[string]paramSpec, error) {
 	for iter.Next(&key) {
 		name, ok := starlark.AsString(key)
 		if !ok {
-			return nil, fmt.Errorf("policy params keys must be strings")
+			return nil, fmt.Errorf("definition params keys must be strings")
 		}
 		raw, _, err := dict.Get(key)
 		if err != nil {
@@ -316,7 +294,7 @@ func unpackParamSpecs(dict *starlark.Dict) (map[string]paramSpec, error) {
 		}
 		value, ok := raw.(*paramSpecValue)
 		if !ok {
-			return nil, fmt.Errorf("policy param %q must be declared with gazelle_policy.param(...)", name)
+			return nil, fmt.Errorf("definition param %q must be declared with gazelle_fold.param(...)", name)
 		}
 		spec := value.spec
 		spec.Name = name

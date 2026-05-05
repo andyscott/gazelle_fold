@@ -1,4 +1,4 @@
-package policy
+package fold
 
 import (
 	"embed"
@@ -6,7 +6,7 @@ import (
 	"path"
 )
 
-//go:embed builtins/lib/*.star builtins/policies/*.star
+//go:embed builtins/folds/*.star builtins/lib/*.star builtins/policies/*.star builtins/rewrites/*.star
 var builtinModuleFS embed.FS
 
 func builtinModuleSource(modulePath string) ([]byte, error) {
