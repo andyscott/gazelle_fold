@@ -13,7 +13,6 @@ go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.from_file(go_mod = "//:go.mod")
 use_repo(
     go_deps,
-    "bazel_gazelle_go_repository_config",
     "com_github_bazelbuild_buildtools",
     "com_github_bmatcuk_doublestar_v4",
     "net_starlark_go",
