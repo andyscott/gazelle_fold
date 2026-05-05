@@ -1,0 +1,8 @@
+# Optional publish-to-bcr settings live here.
+#
+# See:
+# https://github.com/bazel-contrib/publish-to-bcr
+#
+# fixedReleaser:
+#   login: my_github_handle
+#   email: me@example.com
