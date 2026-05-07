@@ -1,0 +1,12 @@
+# gazelle:fold import("rust.star")
+# gazelle:fold use("rust_clippy_targets", scope = "...")
+
+rust_library(
+    name = "root_lib",
+    srcs = ["lib.rs"],
+)
+
+rust_binary(
+    name = "cli",
+    srcs = ["main.rs"],
+)

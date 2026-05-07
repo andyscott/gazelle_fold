@@ -1,0 +1,9 @@
+rust_library(
+    name = "child_lib",
+    srcs = ["lib.rs"],
+)
+
+rust_test(
+    name = "child_tests",
+    srcs = ["tests.rs"],
+)

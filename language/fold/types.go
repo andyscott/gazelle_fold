@@ -76,6 +76,26 @@ type foldState struct {
 	Exports   map[string]string
 }
 
+type managedRuleSpec struct {
+	Kind            string
+	Name            string
+	Present         bool
+	BoolAttrs       map[string]bool
+	StringListAttrs map[string][]string
+}
+
+type managedFilegroupSpec struct {
+	Name    string
+	Srcs    []string
+	Present bool
+	Public  bool
+}
+
+type exportSpec struct {
+	Name  string
+	Label string
+}
+
 type policyViolation struct {
 	File       string
 	PolicyName string

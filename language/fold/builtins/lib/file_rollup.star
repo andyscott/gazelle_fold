@@ -8,35 +8,39 @@ def file_rollup_fold(name, include = None, local_name = None, recursive_name = N
         active_recursive_name = ctx.params.get("recursive_name", recursive_name)
 
         local_files = ctx.matching_files(include = active_include)
-        if local_files:
-            ctx.ensure_filegroup(
+        outputs = [
+            gazelle_fold.filegroup(
                 name = active_local_name,
                 srcs = local_files,
-            )
-        else:
-            ctx.remove_filegroup(name = active_local_name)
+                present = local_files != [],
+            ),
+        ]
 
         children = ctx.child_exports(name)
         if not children.complete:
-            return
+            return outputs
 
         recursive_srcs = []
         if local_files:
             recursive_srcs.append(":" + active_local_name)
         recursive_srcs.extend(children.labels)
 
-        if recursive_srcs:
-            ctx.ensure_filegroup(
+        outputs.append(
+            gazelle_fold.filegroup(
                 name = active_recursive_name,
                 srcs = recursive_srcs,
                 public = True,
+                present = recursive_srcs != [],
+            ),
+        )
+        if recursive_srcs:
+            outputs.append(
+                gazelle_fold.export(
+                    name = name,
+                    label = ":" + active_recursive_name,
+                ),
             )
-            ctx.export(
-                name = name,
-                label = ":" + active_recursive_name,
-            )
-        else:
-            ctx.remove_filegroup(name = active_recursive_name)
+        return outputs
 
     params = {}
     if include == None:

@@ -21,6 +21,13 @@ policy names.
 files, ancestors combine child exports, and a full walk can build a recursive
 target back toward the root.
 
+`rust_clippy/` is the package-local synthesis example. One activation at the
+subtree root derives a managed `rust_clippy(name = "clippy")` target in every
+package that owns handwritten Rust rules, and removes that managed rule when a
+package stops owning any. That is the right shape when every package needs the
+same local aggregator, but the source of truth should remain the package's own
+rules rather than a parent rollup.
+
 For one-off exceptions, keep the reason beside the rule:
 
 ```python

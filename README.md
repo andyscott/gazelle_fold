@@ -150,6 +150,10 @@ For a tiny repo that consumes `gazelle_fold` as a dependency instead of as the
 root module, see [`examples/bzlmod`](examples/bzlmod). CI runs that module
 separately so the public integration path stays honest.
 
+For a package-local rule synthesis example, see
+[`examples/rust_clippy`](examples/rust_clippy). It keeps one managed Clippy
+target per Rust package from a single root activation.
+
 ## Module paths
 
 Modules resolve through a small mount table:
@@ -230,6 +234,9 @@ gazelle_fold.param(type, required = False, default = None)
 gazelle_fold.fold(name, params = {}, apply = fn)
 gazelle_fold.rewrite(name, params = {}, apply = fn)
 gazelle_fold.policy(name, params = {}, apply = fn)
+gazelle_fold.rule(kind, name, present = True, bool_attrs = {}, string_list_attrs = {})
+gazelle_fold.filegroup(name, srcs, present = True, public = False)
+gazelle_fold.export(name, label)
 ```
 
 Fold callbacks receive `(ctx)`. Rewrites and policies receive `(ctx, rule)`.
@@ -249,12 +256,18 @@ ctx.rel
 ctx.name
 ctx.params
 ctx.matching_files(include)
-ctx.ensure_filegroup(name, srcs, public = False)
-ctx.remove_filegroup(name)
+ctx.rules_matching(kinds)
 ctx.child_exports(name)
-ctx.export(name, label)
 ctx.report_violation(message)  # policies only
 ```
+
+Fold callbacks return package outputs such as `gazelle_fold.rule(...)`,
+`gazelle_fold.filegroup(...)`, and `gazelle_fold.export(...)`. Managed rules
+and filegroups declare whether they should be present, so the host owns the
+ensure/remove machinery and fold authors describe the final BUILD shape instead
+of scripting mutations. Omitting a managed output is a no-op; explicit absence
+keeps deletion ownership local and prevents a fold from silently claiming
+unrelated package rules.
 
 `params` is a real definition contract: unknown names, missing required params,
 and wrong types are rejected instead of silently falling through.
@@ -264,8 +277,8 @@ and wrong types are rejected instead of silently falling through.
 - Directive comments use a tiny one-command language, not general Starlark.
 - The built-in mount table exposes `std` and `root`; user-configured mounts are
   not surfaced yet.
-- The host currently exposes safe string-list edits and filegroup generation,
-  not arbitrary BUILD AST mutation.
+- The host exposes safe string-list edits plus declarative package outputs, not
+  arbitrary BUILD AST mutation.
 - `required_tags` only rewrites literal string-list attributes; complex
   `select(...)`-style expressions are skipped rather than guessed at.
 - `forbidden_deps` reports direct labels from literal `deps` lists and fails the

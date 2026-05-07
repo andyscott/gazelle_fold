@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/bazel-gazelle/config"
+	"github.com/bazelbuild/bazel-gazelle/language"
 	"github.com/bazelbuild/bazel-gazelle/rule"
+	"go.starlark.net/starlark"
 )
 
 func TestScopeCoverage(t *testing.T) {
@@ -180,6 +182,279 @@ func TestRuleValueExposesValidationOnlyDepsAPI(t *testing.T) {
 	}
 	if attr != nil {
 		t.Fatalf("remove_deps_matching attr = %#v, want nil", attr)
+	}
+}
+
+func TestFoldContextExposesReadOnlyPackageAPI(t *testing.T) {
+	value := &foldContextValue{}
+	if got, want := value.AttrNames(), []string{
+		"rel",
+		"name",
+		"params",
+		"matching_files",
+		"rules_matching",
+		"child_exports",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("fold attrs = %#v, want %#v", got, want)
+	}
+}
+
+func TestFoldContextRulesMatchingReturnsLocalRules(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "pkg", []byte(`
+rust_library(name = "lib")
+rust_binary(name = "bin")
+rust_test(name = "tests")
+filegroup(name = "files")
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &foldContextValue{
+		args: language.GenerateArgs{
+			Rel:  "pkg",
+			File: f,
+		},
+	}
+	attr, err := ctx.Attr("rules_matching")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := starlark.Call(
+		&starlark.Thread{Name: "test rules_matching"},
+		attr.(starlark.Callable),
+		nil,
+		[]starlark.Tuple{{
+			starlark.String("kinds"),
+			stringList([]string{"rust_library", "rust_test"}),
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := got.(*starlark.List)
+	if list.Len() != 2 {
+		t.Fatalf("rules_matching len = %d, want 2", list.Len())
+	}
+	var names []string
+	for i := 0; i < list.Len(); i++ {
+		names = append(names, list.Index(i).(*ruleValue).rule.Name())
+	}
+	if want := []string{"lib", "tests"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("rules_matching names = %#v, want %#v", names, want)
+	}
+}
+
+func TestFoldCanReturnDeclarativeManagedRules(t *testing.T) {
+	root := t.TempDir()
+	writePolicyFile(t, root, "managed.star", `
+def _apply(ctx):
+    return [
+        gazelle_fold.rule(
+            kind = "rust_clippy",
+            name = "clippy",
+            bool_attrs = {"testonly": True},
+            string_list_attrs = {
+                "deps": [":lib"],
+                "tags": ["clippy"],
+            },
+        ),
+    ]
+
+gazelle_fold.fold(
+    name = "clippy",
+    apply = _apply,
+)
+`)
+	definitions, err := loadPolicyFile(root, "", "managed.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := rule.LoadData("BUILD.bazel", "pkg", []byte(`
+rust_library(name = "lib")
+
+rust_clippy(
+    name = "clippy",
+    deps = [":old"],
+    tags = ["legacy"],
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := effectiveDefinition{
+		Activation: activation{Name: "clippy"},
+		Definition: definitions["clippy"],
+	}
+	ctx, err := newFoldContextValue(nil, language.GenerateArgs{
+		Rel:  "pkg",
+		File: f,
+	}, active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runFold(active, ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Rules) != 2 {
+		t.Fatalf("rules after declarative fold = %d, want 2", len(f.Rules))
+	}
+	managed := f.Rules[1]
+	if got, want := managed.Kind(), "rust_clippy"; got != want {
+		t.Fatalf("managed kind = %q, want %q", got, want)
+	}
+	if got, want := managed.Name(), "clippy"; got != want {
+		t.Fatalf("managed name = %q, want %q", got, want)
+	}
+	if got, want := managed.AttrStrings("deps"), []string{":lib"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("managed deps = %#v, want %#v", got, want)
+	}
+	if got, want := managed.AttrStrings("tags"), []string{"clippy"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("managed tags = %#v, want %#v", got, want)
+	}
+	if !managed.AttrBool("testonly") {
+		t.Fatal("managed rule missing testonly = True")
+	}
+}
+
+func TestFoldCanReturnExplicitlyAbsentManagedRules(t *testing.T) {
+	root := t.TempDir()
+	writePolicyFile(t, root, "managed.star", `
+def _apply(ctx):
+    return [
+        gazelle_fold.rule(
+            kind = "rust_clippy",
+            name = "clippy",
+            present = False,
+        ),
+    ]
+
+gazelle_fold.fold(
+    name = "clippy",
+    apply = _apply,
+)
+`)
+	definitions, err := loadPolicyFile(root, "", "managed.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := rule.LoadData("BUILD.bazel", "pkg", []byte(`
+rust_clippy(
+    name = "clippy",
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := effectiveDefinition{
+		Activation: activation{Name: "clippy"},
+		Definition: definitions["clippy"],
+	}
+	ctx, err := newFoldContextValue(nil, language.GenerateArgs{
+		Rel:  "pkg",
+		File: f,
+	}, active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runFold(active, ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.Sync()
+	if got := string(f.Format()); got != "" {
+		t.Fatalf("formatted file after declarative removal = %q, want empty", got)
+	}
+}
+
+func TestFoldRejectsInvalidDeclarativeRuleResults(t *testing.T) {
+	root := t.TempDir()
+	writePolicyFile(t, root, "managed.star", `
+def _apply(ctx):
+    return "not a rule list"
+
+gazelle_fold.fold(
+    name = "clippy",
+    apply = _apply,
+)
+`)
+	definitions, err := loadPolicyFile(root, "", "managed.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := effectiveDefinition{
+		Activation: activation{Name: "clippy"},
+		Definition: definitions["clippy"],
+	}
+	ctx, err := newFoldContextValue(nil, language.GenerateArgs{Rel: "pkg"}, active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runFold(active, ctx); err == nil {
+		t.Fatal("runFold unexpectedly accepted a non-list declarative result")
+	} else if got, want := err.Error(), `fold "clippy" must return None or a list or tuple of fold output values`; got != want {
+		t.Fatalf("runFold error = %q, want %q", got, want)
+	}
+}
+
+func TestFoldRejectsDeclarativeRuleKindConflicts(t *testing.T) {
+	root := t.TempDir()
+	writePolicyFile(t, root, "managed.star", `
+def _apply(ctx):
+    return [
+        gazelle_fold.rule(
+            kind = "rust_clippy",
+            name = "clippy",
+        ),
+    ]
+
+gazelle_fold.fold(
+    name = "clippy",
+    apply = _apply,
+)
+`)
+	definitions, err := loadPolicyFile(root, "", "managed.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := rule.LoadData("BUILD.bazel", "pkg", []byte(`
+filegroup(
+    name = "clippy",
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := effectiveDefinition{
+		Activation: activation{Name: "clippy"},
+		Definition: definitions["clippy"],
+	}
+	ctx, err := newFoldContextValue(nil, language.GenerateArgs{
+		Rel:  "pkg",
+		File: f,
+	}, active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runFold(active, ctx)
+	if err == nil {
+		t.Fatal("runFold unexpectedly replaced an unrelated same-name rule")
+	}
+	if got, want := err.Error(), `cannot ensure rust_clippy "clippy" because filegroup "clippy" already exists`; got != want {
+		t.Fatalf("runFold error = %q, want %q", got, want)
+	}
+}
+
+func TestRuleConstructorReservesFilegroupsForSpecializedOutput(t *testing.T) {
+	root := t.TempDir()
+	writePolicyFile(t, root, "managed.star", `
+gazelle_fold.rule(
+    kind = "filegroup",
+    name = "files",
+)
+`)
+	if _, err := loadPolicyFile(root, "", "managed.star"); err == nil {
+		t.Fatal("loadPolicyFile unexpectedly accepted filegroup through gazelle_fold.rule")
+	} else if got, want := err.Error(), `gazelle_fold.rule kind "filegroup" is reserved; use gazelle_fold.filegroup(...)`; got != want {
+		t.Fatalf("loadPolicyFile error = %q, want %q", got, want)
 	}
 }
 

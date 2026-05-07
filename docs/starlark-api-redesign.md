@@ -132,6 +132,9 @@ gazelle_fold.param(type, required = False, default = None)
 gazelle_fold.fold(name, params = {}, apply = fn)
 gazelle_fold.rewrite(name, params = {}, apply = fn)
 gazelle_fold.policy(name, params = {}, apply = fn)
+gazelle_fold.rule(kind, name, present = True, bool_attrs = {}, string_list_attrs = {})
+gazelle_fold.filegroup(name, srcs, present = True, public = False)
+gazelle_fold.export(name, label)
 ```
 
 `params` is a schema, not a loose bag. The host rejects:
@@ -198,14 +201,44 @@ ctx.rel
 ctx.name
 ctx.params
 ctx.matching_files(include)
-ctx.ensure_filegroup(name, srcs, public = False)
-ctx.remove_filegroup(name)
+ctx.rules_matching(kinds)
 ctx.child_exports(name)
-ctx.export(name, label)
 ```
 
-`ensure_filegroup(...)` and `remove_filegroup(...)` are separate on purpose:
-empty `srcs` is a legitimate Bazel value and should not secretly mean delete.
+Fold callbacks describe package outputs declaratively:
+
+```python
+def apply(ctx):
+    deps = [":" + rule.name for rule in ctx.rules_matching(["rust_library"])]
+    return [
+        gazelle_fold.rule(
+            kind = "rust_clippy",
+            name = "clippy",
+            present = deps != [],
+            string_list_attrs = {"deps": deps},
+        ),
+    ]
+```
+
+Returned `gazelle_fold.rule(...)` and `gazelle_fold.filegroup(...)` values
+declare one exact managed output's desired presence. The host reconciles
+`present = True` and `present = False`; omission is deliberately a no-op so a
+fold cannot accidentally delete a package rule it never named. `srcs = []` is a
+valid filegroup value, so deletion stays explicit through `present = False`
+rather than hiding behind an empty list. `gazelle_fold.export(...)` is ephemeral:
+it makes a label visible to ancestor folds during this walk but does not mutate a
+BUILD file directly.
+
+The stock `file_rollup` fold now follows the same contract: it returns
+`gazelle_fold.filegroup(...)` outputs for the local and recursive targets, and a
+`gazelle_fold.export(...)` output only when there is a recursive label for
+ancestors to consume.
+
+That declarative boundary is fold-specific on purpose. Folds own a package-level
+desired state, so returning outputs makes the whole package shape visible at
+once. Rewrites and policies already run at the natural one-rule boundary, where
+`rule.ensure_list_attr_contains(...)` and `ctx.report_violation(...)` stay
+smaller and clearer than inventing patch or violation result objects.
 
 `ctx.child_exports(name)` returns:
 

@@ -74,6 +74,12 @@ func newStarlarkLoader(repoRoot string) *starlarkLoader {
 				"fold":    starlark.NewBuiltin("gazelle_fold.fold", loader.foldBuiltin),
 				"rewrite": starlark.NewBuiltin("gazelle_fold.rewrite", loader.rewriteBuiltin),
 				"policy":  starlark.NewBuiltin("gazelle_fold.policy", loader.policyBuiltin),
+				"rule":    starlark.NewBuiltin("gazelle_fold.rule", loader.ruleBuiltin),
+				"filegroup": starlark.NewBuiltin(
+					"gazelle_fold.filegroup",
+					loader.filegroupBuiltin,
+				),
+				"export": starlark.NewBuiltin("gazelle_fold.export", loader.exportBuiltin),
 			},
 		),
 	}
@@ -230,6 +236,99 @@ func (l *starlarkLoader) foldBuiltin(_ *starlark.Thread, _ *starlark.Builtin, ar
 	return l.registerDefinition("gazelle_fold.fold", "fold", kindFold, 1, args, kwargs)
 }
 
+func (l *starlarkLoader) ruleBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var (
+		kind            string
+		name            string
+		present         = true
+		boolAttrs       starlark.Value
+		stringListAttrs starlark.Value
+	)
+	if err := starlark.UnpackArgs("gazelle_fold.rule", args, kwargs,
+		"kind", &kind,
+		"name", &name,
+		"present?", &present,
+		"bool_attrs?", &boolAttrs,
+		"string_list_attrs?", &stringListAttrs,
+	); err != nil {
+		return nil, err
+	}
+	if kind == "" {
+		return nil, fmt.Errorf("gazelle_fold.rule kind must not be empty")
+	}
+	if kind == "filegroup" {
+		return nil, fmt.Errorf(`gazelle_fold.rule kind "filegroup" is reserved; use gazelle_fold.filegroup(...)`)
+	}
+	if name == "" {
+		return nil, fmt.Errorf("gazelle_fold.rule name must not be empty")
+	}
+	parsedBoolAttrs, err := readBoolDict("gazelle_fold.rule.bool_attrs", boolAttrs)
+	if err != nil {
+		return nil, err
+	}
+	parsedStringListAttrs, err := readStringListDict("gazelle_fold.rule.string_list_attrs", stringListAttrs)
+	if err != nil {
+		return nil, err
+	}
+	return &managedRuleSpecValue{spec: managedRuleSpec{
+		Kind:            kind,
+		Name:            name,
+		Present:         present,
+		BoolAttrs:       parsedBoolAttrs,
+		StringListAttrs: parsedStringListAttrs,
+	}}, nil
+}
+
+func (l *starlarkLoader) filegroupBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var (
+		name    string
+		srcs    starlark.Value
+		present = true
+		public  bool
+	)
+	if err := starlark.UnpackArgs("gazelle_fold.filegroup", args, kwargs,
+		"name", &name,
+		"srcs", &srcs,
+		"present?", &present,
+		"public?", &public,
+	); err != nil {
+		return nil, err
+	}
+	if name == "" {
+		return nil, fmt.Errorf("gazelle_fold.filegroup name must not be empty")
+	}
+	values, err := readStringSequence("gazelle_fold.filegroup.srcs", srcs)
+	if err != nil {
+		return nil, err
+	}
+	return &managedFilegroupSpecValue{spec: managedFilegroupSpec{
+		Name:    name,
+		Srcs:    values,
+		Present: present,
+		Public:  public,
+	}}, nil
+}
+
+func (l *starlarkLoader) exportBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var (
+		name  string
+		label string
+	)
+	if err := starlark.UnpackArgs("gazelle_fold.export", args, kwargs,
+		"name", &name,
+		"label", &label,
+	); err != nil {
+		return nil, err
+	}
+	if name == "" {
+		return nil, fmt.Errorf("gazelle_fold.export name must not be empty")
+	}
+	return &exportSpecValue{spec: exportSpec{
+		Name:  name,
+		Label: label,
+	}}, nil
+}
+
 func (l *starlarkLoader) registerDefinition(apiName, kindName string, kind definitionKind, arity int, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		name   string
@@ -274,6 +373,40 @@ func (*paramSpecValue) Type() string          { return "param" }
 func (*paramSpecValue) Freeze()               {}
 func (*paramSpecValue) Truth() starlark.Bool  { return starlark.True }
 func (*paramSpecValue) Hash() (uint32, error) { return 0, fmt.Errorf("param is unhashable") }
+
+type managedRuleSpecValue struct {
+	spec managedRuleSpec
+}
+
+func (*managedRuleSpecValue) String() string       { return "rule(...)" }
+func (*managedRuleSpecValue) Type() string         { return "rule_spec" }
+func (*managedRuleSpecValue) Freeze()              {}
+func (*managedRuleSpecValue) Truth() starlark.Bool { return starlark.True }
+func (*managedRuleSpecValue) Hash() (uint32, error) {
+	return 0, fmt.Errorf("rule spec is unhashable")
+}
+
+type managedFilegroupSpecValue struct {
+	spec managedFilegroupSpec
+}
+
+func (*managedFilegroupSpecValue) String() string       { return "filegroup(...)" }
+func (*managedFilegroupSpecValue) Type() string         { return "filegroup_spec" }
+func (*managedFilegroupSpecValue) Freeze()              {}
+func (*managedFilegroupSpecValue) Truth() starlark.Bool { return starlark.True }
+func (*managedFilegroupSpecValue) Hash() (uint32, error) {
+	return 0, fmt.Errorf("filegroup spec is unhashable")
+}
+
+type exportSpecValue struct {
+	spec exportSpec
+}
+
+func (*exportSpecValue) String() string        { return "export(...)" }
+func (*exportSpecValue) Type() string          { return "export_spec" }
+func (*exportSpecValue) Freeze()               {}
+func (*exportSpecValue) Truth() starlark.Bool  { return starlark.True }
+func (*exportSpecValue) Hash() (uint32, error) { return 0, fmt.Errorf("export spec is unhashable") }
 
 func unpackParamSpecs(dict *starlark.Dict) (map[string]paramSpec, error) {
 	if dict == nil || dict.Len() == 0 {
