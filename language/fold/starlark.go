@@ -44,7 +44,7 @@ type starlarkLoader struct {
 	predeclared starlark.StringDict
 }
 
-func loadPolicyFile(repoRoot, packageRel, spec string) (map[string]definition, error) {
+func loadDefinitionFile(repoRoot, packageRel, spec string) (map[string]definition, error) {
 	loader := newStarlarkLoader(repoRoot)
 	base := moduleID{
 		Mount: "root",
@@ -312,7 +312,6 @@ func (l *starlarkLoader) registerDefinition(apiName, kindName string, kind defin
 		return nil, fmt.Errorf("definition %q is already registered", name)
 	}
 	l.definitions[name] = definition{
-		Name:   name,
 		Kind:   kind,
 		Params: paramSpecs,
 		Apply:  apply,
@@ -373,9 +372,7 @@ func unpackParamSpecs(dict *starlark.Dict) (map[string]paramSpec, error) {
 		if !ok {
 			return nil, fmt.Errorf("definition param %q must be declared with gazelle_fold.param(...)", name)
 		}
-		spec := value.spec
-		spec.Name = name
-		out[name] = spec
+		out[name] = value.spec
 	}
 	return out, nil
 }

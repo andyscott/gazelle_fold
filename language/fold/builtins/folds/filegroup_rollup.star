@@ -1,6 +1,16 @@
 """Fold child filegroups into recursive ancestor filegroups."""
 
-load("std:lib/filegroup.star", "filegroup")
+
+def _filegroup(name, srcs, present = True, visibility = None):
+    attrs = {"srcs": srcs}
+    if visibility != None:
+        attrs["visibility"] = visibility
+    return gazelle_fold.rule(
+        kind = "filegroup",
+        name = name,
+        present = present,
+        attrs = attrs,
+    )
 
 
 def _apply(ctx):
@@ -9,7 +19,7 @@ def _apply(ctx):
 
     local_files = ctx.matching_files(include = ctx.params["include"])
     outputs = [
-        filegroup(
+        _filegroup(
             name = local_name,
             srcs = local_files,
             present = local_files != [],
@@ -26,7 +36,7 @@ def _apply(ctx):
     recursive_srcs.extend(children.labels)
 
     outputs.append(
-        filegroup(
+        _filegroup(
             name = recursive_name,
             srcs = recursive_srcs,
             present = recursive_srcs != [],

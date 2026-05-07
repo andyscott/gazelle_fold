@@ -197,7 +197,7 @@ rust_library(
 
 ## Starlark host API
 
-The built-in library is ordinary Starlark layered over a deliberately small host:
+The bundled modules are ordinary Starlark layered over a deliberately small host:
 
 ```python
 gazelle_fold.param(type, required = False, default = None)
@@ -214,15 +214,11 @@ ancestors. Rewrites change local rules. Policies report violations and can fail
 the run.
 
 ```text
-rule.kind
 rule.name
 rule.matches_kind(patterns)
-rule.list_attr(name)
 rule.ensure_list_attr_contains(name, values)
 rule.deps_matching(patterns)
 
-ctx.rel
-ctx.name
 ctx.params
 ctx.matching_files(include)
 ctx.rules_matching(kinds)

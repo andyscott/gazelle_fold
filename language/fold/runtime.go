@@ -21,7 +21,6 @@ func runRuleDefinition(active effectiveDefinition, rel, file string, r *rule.Rul
 		active.Definition.Apply,
 		starlark.Tuple{
 			&ruleContextValue{
-				rel:             rel,
 				name:            active.Activation.Name,
 				params:          params,
 				file:            file,
@@ -55,7 +54,6 @@ func runFold(active effectiveDefinition, ctx *foldContextValue) error {
 }
 
 type ruleContextValue struct {
-	rel             string
 	name            string
 	params          *starlark.Dict
 	file            string
@@ -75,10 +73,6 @@ func (*ruleContextValue) Hash() (uint32, error) {
 
 func (ctx *ruleContextValue) Attr(name string) (starlark.Value, error) {
 	switch name {
-	case "rel":
-		return starlark.String(ctx.rel), nil
-	case "name":
-		return starlark.String(ctx.name), nil
 	case "params":
 		return ctx.params, nil
 	case "report_violation":
@@ -93,9 +87,9 @@ func (ctx *ruleContextValue) Attr(name string) (starlark.Value, error) {
 
 func (ctx *ruleContextValue) AttrNames() []string {
 	if !ctx.allowViolation {
-		return []string{"rel", "name", "params"}
+		return []string{"params"}
 	}
-	return []string{"rel", "name", "params", "report_violation"}
+	return []string{"params", "report_violation"}
 }
 
 type ruleValue struct {
@@ -112,14 +106,10 @@ func (*ruleValue) Hash() (uint32, error) { return 0, fmt.Errorf("rule is unhasha
 
 func (r *ruleValue) Attr(name string) (starlark.Value, error) {
 	switch name {
-	case "kind":
-		return starlark.String(r.rule.Kind()), nil
 	case "name":
 		return starlark.String(r.rule.Name()), nil
 	case "matches_kind":
 		return ruleMatchesKind.BindReceiver(r), nil
-	case "list_attr":
-		return ruleListAttr.BindReceiver(r), nil
 	case "ensure_list_attr_contains":
 		return ruleEnsureListAttrContains.BindReceiver(r), nil
 	case "deps_matching":
@@ -130,7 +120,7 @@ func (r *ruleValue) Attr(name string) (starlark.Value, error) {
 }
 
 func (*ruleValue) AttrNames() []string {
-	return []string{"kind", "name", "matches_kind", "list_attr", "ensure_list_attr_contains", "deps_matching"}
+	return []string{"name", "matches_kind", "ensure_list_attr_contains", "deps_matching"}
 }
 
 var ruleContextReportViolation = starlark.NewBuiltin("report_violation", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -165,19 +155,6 @@ var ruleMatchesKind = starlark.NewBuiltin("matches_kind", func(_ *starlark.Threa
 		return nil, err
 	}
 	return starlark.Bool(matchesAnyKind(values, self.rule.Kind())), nil
-})
-
-var ruleListAttr = starlark.NewBuiltin("list_attr", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	self := fn.Receiver().(*ruleValue)
-	var name string
-	if err := starlark.UnpackArgs("list_attr", args, kwargs, "name", &name); err != nil {
-		return nil, err
-	}
-	values, ok := literalStringListAttr(self.rule.Attr(name))
-	if !ok {
-		return starlark.None, nil
-	}
-	return stringList(values), nil
 })
 
 var ruleEnsureListAttrContains = starlark.NewBuiltin("ensure_list_attr_contains", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -256,10 +233,6 @@ func (*foldContextValue) Hash() (uint32, error) {
 
 func (ctx *foldContextValue) Attr(name string) (starlark.Value, error) {
 	switch name {
-	case "rel":
-		return starlark.String(ctx.args.Rel), nil
-	case "name":
-		return starlark.String(ctx.active.Name), nil
 	case "params":
 		return ctx.params, nil
 	case "matching_files":
@@ -275,8 +248,6 @@ func (ctx *foldContextValue) Attr(name string) (starlark.Value, error) {
 
 func (*foldContextValue) AttrNames() []string {
 	return []string{
-		"rel",
-		"name",
 		"params",
 		"matching_files",
 		"rules_matching",
@@ -465,7 +436,7 @@ var packageChildExports = starlark.NewBuiltin("child_exports", func(_ *starlark.
 			continue
 		}
 		childState, ok := self.lang.foldStates[childRel][self.active.Name]
-		if !ok || !childState.Generated || !childState.Complete {
+		if !ok || !childState.Complete {
 			complete = false
 			continue
 		}

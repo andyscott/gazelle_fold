@@ -36,38 +36,38 @@ func TestScopeCoverage(t *testing.T) {
 	}
 }
 
-func TestEffectivePolicyLayersNearestParams(t *testing.T) {
+func TestEffectiveDefinitionsLayerNearestParams(t *testing.T) {
 	scopeAll, _ := parseScope("...")
 	scopeHere, _ := parseScope(".")
 	cfg := newFoldConfig()
-	cfg.Definitions["required_tags"] = definition{Name: "required_tags", Kind: kindRulePolicy}
+	cfg.Definitions["required_tags"] = definition{Kind: kindRulePolicy}
 	cfg.addActivation("required_tags", "", scopeAll, map[string]any{
 		"kinds": []string{"rust_library"},
 		"tags":  []string{"root"},
 	})
 	cfg.addActivation("required_tags", "child", scopeHere, map[string]any{"tags": []string{"child"}})
 
-	child := effectivePolicies(cfg, "child")
+	child := effectiveDefinitions(cfg, "child")
 	if got := child[0].Activation.Params["tags"].([]string)[0]; got != "child" {
 		t.Fatalf("child effective tags = %q, want child", got)
 	}
 	if got := child[0].Activation.Params["kinds"].([]string)[0]; got != "rust_library" {
 		t.Fatalf("child effective kinds = %q, want rust_library", got)
 	}
-	grandchild := effectivePolicies(cfg, "child/grandchild")
+	grandchild := effectiveDefinitions(cfg, "child/grandchild")
 	if got := grandchild[0].Activation.Params["tags"].([]string)[0]; got != "root" {
 		t.Fatalf("grandchild effective tags = %q, want root", got)
 	}
 }
 
-func TestEffectivePolicyPrefersLaterDirectiveInSameFile(t *testing.T) {
+func TestEffectiveDefinitionsPreferLaterDirectiveInSameFile(t *testing.T) {
 	scopeAll, _ := parseScope("...")
 	cfg := newFoldConfig()
-	cfg.Definitions["required_tags"] = definition{Name: "required_tags", Kind: kindRulePolicy}
+	cfg.Definitions["required_tags"] = definition{Kind: kindRulePolicy}
 	cfg.addActivation("required_tags", "pkg", scopeAll, map[string]any{"tags": []string{"first"}})
 	cfg.addActivation("required_tags", "pkg", scopeAll, map[string]any{"tags": []string{"second"}})
 
-	effective := effectivePolicies(cfg, "pkg/child")
+	effective := effectiveDefinitions(cfg, "pkg/child")
 	if got := effective[0].Activation.Params["tags"].([]string)[0]; got != "second" {
 		t.Fatalf("effective tags = %q, want second", got)
 	}
@@ -83,22 +83,22 @@ func TestParseImportDirective(t *testing.T) {
 	}
 }
 
-func TestLoadPolicyFileSupportsRootAndRelativeLoads(t *testing.T) {
+func TestLoadDefinitionFileSupportsRootAndRelativeLoads(t *testing.T) {
 	root := t.TempDir()
-	writePolicyFile(t, root, "build/gazelle_fold/helpers.star", `
+	writeDefinitionFile(t, root, "build/gazelle_fold/helpers.star", `
 def register(name):
     gazelle_fold.rewrite(
         name = name,
         apply = lambda ctx, rule: None,
     )
 `)
-	writePolicyFile(t, root, "build/gazelle_fold/definitions.star", `
+	writeDefinitionFile(t, root, "build/gazelle_fold/definitions.star", `
 load("helpers.star", "register")
 
 register("required_tags")
 `)
 
-	definitions, err := loadPolicyFile(root, "", "root:build/gazelle_fold/definitions.star")
+	definitions, err := loadDefinitionFile(root, "", "root:build/gazelle_fold/definitions.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,16 +107,16 @@ register("required_tags")
 	}
 }
 
-func TestLoadPolicyFileSupportsRelativeImportsFromBuildPackage(t *testing.T) {
+func TestLoadDefinitionFileSupportsRelativeImportsFromBuildPackage(t *testing.T) {
 	root := t.TempDir()
-	writePolicyFile(t, root, "pkg/definitions.star", `
+	writeDefinitionFile(t, root, "pkg/definitions.star", `
 gazelle_fold.rewrite(
     name = "required_tags",
     apply = lambda ctx, rule: None,
 )
 `)
 
-	definitions, err := loadPolicyFile(root, "pkg", "definitions.star")
+	definitions, err := loadDefinitionFile(root, "pkg", "definitions.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,8 +136,8 @@ func TestModuleRefsCannotEscapeMount(t *testing.T) {
 	}
 }
 
-func TestLoadPolicyFileSupportsBuiltinRewrites(t *testing.T) {
-	definitions, err := loadPolicyFile(t.TempDir(), "", "std:rewrites/required_tags.star")
+func TestLoadDefinitionFileSupportsBuiltinRewrites(t *testing.T) {
+	definitions, err := loadDefinitionFile(t.TempDir(), "", "std:rewrites/required_tags.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,8 +150,8 @@ func TestLoadPolicyFileSupportsBuiltinRewrites(t *testing.T) {
 	}
 }
 
-func TestLoadPolicyFileSupportsBuiltinForbiddenDepsPolicy(t *testing.T) {
-	definitions, err := loadPolicyFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
+func TestLoadDefinitionFileSupportsBuiltinForbiddenDepsPolicy(t *testing.T) {
+	definitions, err := loadDefinitionFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,10 +167,8 @@ func TestLoadPolicyFileSupportsBuiltinForbiddenDepsPolicy(t *testing.T) {
 func TestRuleValueExposesValidationOnlyDepsAPI(t *testing.T) {
 	value := &ruleValue{}
 	if got, want := value.AttrNames(), []string{
-		"kind",
 		"name",
 		"matches_kind",
-		"list_attr",
 		"ensure_list_attr_contains",
 		"deps_matching",
 	}; !reflect.DeepEqual(got, want) {
@@ -188,8 +186,6 @@ func TestRuleValueExposesValidationOnlyDepsAPI(t *testing.T) {
 func TestFoldContextExposesReadOnlyPackageAPI(t *testing.T) {
 	value := &foldContextValue{}
 	if got, want := value.AttrNames(), []string{
-		"rel",
-		"name",
 		"params",
 		"matching_files",
 		"rules_matching",
@@ -246,7 +242,7 @@ filegroup(name = "files")
 
 func TestFoldCanReturnDeclarativeManagedRules(t *testing.T) {
 	root := t.TempDir()
-	writePolicyFile(t, root, "managed.star", `
+	writeDefinitionFile(t, root, "managed.star", `
 def _apply(ctx):
     return [
         gazelle_fold.rule(
@@ -266,7 +262,7 @@ gazelle_fold.fold(
     apply = _apply,
 )
 `)
-	definitions, err := loadPolicyFile(root, "", "managed.star")
+	definitions, err := loadDefinitionFile(root, "", "managed.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +318,7 @@ rust_clippy(
 
 func TestFoldCanReturnExplicitlyAbsentManagedRules(t *testing.T) {
 	root := t.TempDir()
-	writePolicyFile(t, root, "managed.star", `
+	writeDefinitionFile(t, root, "managed.star", `
 def _apply(ctx):
     return [
         gazelle_fold.rule(
@@ -337,7 +333,7 @@ gazelle_fold.fold(
     apply = _apply,
 )
 `)
-	definitions, err := loadPolicyFile(root, "", "managed.star")
+	definitions, err := loadDefinitionFile(root, "", "managed.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +367,7 @@ rust_clippy(
 
 func TestFoldRejectsInvalidDeclarativeRuleResults(t *testing.T) {
 	root := t.TempDir()
-	writePolicyFile(t, root, "managed.star", `
+	writeDefinitionFile(t, root, "managed.star", `
 def _apply(ctx):
     return "not a rule list"
 
@@ -380,7 +376,7 @@ gazelle_fold.fold(
     apply = _apply,
 )
 `)
-	definitions, err := loadPolicyFile(root, "", "managed.star")
+	definitions, err := loadDefinitionFile(root, "", "managed.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +397,7 @@ gazelle_fold.fold(
 
 func TestFoldRejectsDeclarativeRuleKindConflicts(t *testing.T) {
 	root := t.TempDir()
-	writePolicyFile(t, root, "managed.star", `
+	writeDefinitionFile(t, root, "managed.star", `
 def _apply(ctx):
     return [
         gazelle_fold.rule(
@@ -415,7 +411,7 @@ gazelle_fold.fold(
     apply = _apply,
 )
 `)
-	definitions, err := loadPolicyFile(root, "", "managed.star")
+	definitions, err := loadDefinitionFile(root, "", "managed.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +445,7 @@ filegroup(
 
 func TestFoldRejectsDuplicateManagedRuleNames(t *testing.T) {
 	root := t.TempDir()
-	writePolicyFile(t, root, "managed.star", `
+	writeDefinitionFile(t, root, "managed.star", `
 def _apply(ctx):
     return [
         gazelle_fold.rule(
@@ -468,7 +464,7 @@ gazelle_fold.fold(
     apply = _apply,
 )
 `)
-	definitions, err := loadPolicyFile(root, "", "managed.star")
+	definitions, err := loadDefinitionFile(root, "", "managed.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +487,7 @@ gazelle_fold.fold(
 
 func TestFoldCanReturnDeclarativeFilegroupsThroughRule(t *testing.T) {
 	root := t.TempDir()
-	writePolicyFile(t, root, "managed.star", `
+	writeDefinitionFile(t, root, "managed.star", `
 def _apply(ctx):
     return [
         gazelle_fold.rule(
@@ -506,7 +502,7 @@ gazelle_fold.fold(
     apply = _apply,
 )
 `)
-	definitions, err := loadPolicyFile(root, "", "managed.star")
+	definitions, err := loadDefinitionFile(root, "", "managed.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +530,7 @@ gazelle_fold.fold(
 
 func TestFoldCanRemoveDeclarativeFilegroupsThroughRule(t *testing.T) {
 	root := t.TempDir()
-	writePolicyFile(t, root, "managed.star", `
+	writeDefinitionFile(t, root, "managed.star", `
 def _apply(ctx):
     return [
         gazelle_fold.rule(
@@ -549,7 +545,7 @@ gazelle_fold.fold(
     apply = _apply,
 )
 `)
-	definitions, err := loadPolicyFile(root, "", "managed.star")
+	definitions, err := loadDefinitionFile(root, "", "managed.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,22 +573,22 @@ gazelle_fold.fold(
 
 func TestRuleConstructorRejectsUnsupportedAttrShapes(t *testing.T) {
 	root := t.TempDir()
-	writePolicyFile(t, root, "managed.star", `
+	writeDefinitionFile(t, root, "managed.star", `
 gazelle_fold.rule(
     kind = "rust_clippy",
     name = "clippy",
     attrs = {"deps": {"bad": "shape"}},
 )
 `)
-	if _, err := loadPolicyFile(root, "", "managed.star"); err == nil {
-		t.Fatal("loadPolicyFile unexpectedly accepted a dict-valued rule attr")
+	if _, err := loadDefinitionFile(root, "", "managed.star"); err == nil {
+		t.Fatal("loadDefinitionFile unexpectedly accepted a dict-valued rule attr")
 	} else if got, want := err.Error(), `gazelle_fold.rule.attrs["deps"] must be a bool, string, or list or tuple of strings`; got != want {
-		t.Fatalf("loadPolicyFile error = %q, want %q", got, want)
+		t.Fatalf("loadDefinitionFile error = %q, want %q", got, want)
 	}
 }
 
 func TestDefinitionRejectsUnknownParams(t *testing.T) {
-	definitions, err := loadPolicyFile(t.TempDir(), "", "std:rewrites/required_tags.star")
+	definitions, err := loadDefinitionFile(t.TempDir(), "", "std:rewrites/required_tags.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,7 +612,7 @@ rust_library(name = "fix")
 		t.Fatal(err)
 	}
 
-	definitions, err := loadPolicyFile(t.TempDir(), "", "std:rewrites/required_tags.star")
+	definitions, err := loadDefinitionFile(t.TempDir(), "", "std:rewrites/required_tags.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -656,7 +652,7 @@ rust_library(
 		t.Fatal(err)
 	}
 
-	definitions, err := loadPolicyFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
+	definitions, err := loadDefinitionFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +695,7 @@ rust_library(
 		t.Fatal(err)
 	}
 
-	definitions, err := loadPolicyFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
+	definitions, err := loadDefinitionFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -742,7 +738,7 @@ rust_library(
 		t.Fatal(err)
 	}
 
-	definitions, err := loadPolicyFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
+	definitions, err := loadDefinitionFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -771,7 +767,7 @@ rust_library(
 	}
 }
 
-func writePolicyFile(t *testing.T, root, rel, contents string) {
+func writeDefinitionFile(t *testing.T, root, rel, contents string) {
 	t.Helper()
 	filename := filepath.Join(root, rel)
 	if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {

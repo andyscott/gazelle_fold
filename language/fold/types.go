@@ -43,14 +43,12 @@ const (
 )
 
 type paramSpec struct {
-	Name     string
 	Type     paramType
 	Required bool
 	Default  any
 }
 
 type definition struct {
-	Name   string
 	Kind   definitionKind
 	Params map[string]paramSpec
 	Apply  *starlark.Function
@@ -71,9 +69,8 @@ type foldConfig struct {
 }
 
 type foldState struct {
-	Generated bool
-	Complete  bool
-	Exports   map[string]string
+	Complete bool
+	Exports  map[string]string
 }
 
 type managedRuleSpec struct {

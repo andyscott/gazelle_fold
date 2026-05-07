@@ -15,14 +15,13 @@ pull machine-authored edits back toward the project's own patterns.
 
 ## Recommendation
 
-The public surface should have four layers:
+The public surface should stay this small:
 
 ```text
 BUILD directives       activate named definitions by package scope
 std:folds/*            ready-made folds users can import directly
 std:rewrites/*         ready-made rewrites users can import directly
 std:policies/*         ready-made policies users can import directly
-std:lib/*              tiny output helpers that stay clearer than raw rule calls
 gazelle_fold host      a tiny safe runtime for custom folds, rewrites, and policies
 ```
 
@@ -47,7 +46,6 @@ language. Aspect Gazelle's Orion model showed the better seam: real modules,
 We keep that seam, but make the product much smaller:
 
 - stock definitions are importable directly
-- helper modules are explicit and always loadable
 - user-authored modules are normal mounted files
 - the Go host owns the unsafe BUILD/Gazelle machinery
 - the central abstraction is still the BUILD-tree fold, not a miniature general
@@ -81,16 +79,7 @@ std:policies/forbidden_deps.star
 
 These register generic definition names driven entirely by `use(...)` params.
 
-### Loadable helper library
-
-```python
-load("std:lib/filegroup.star", "filegroup")
-```
-
 Custom folds, rewrites, and policies are ordinary repo-owned `.star` modules.
-The stdlib keeps only tiny helpers whose call sites stay clearer than raw host
-calls; `filegroup(...)` currently exists to keep the stock rollup implementation
-compact without turning filegroups into a special host concept.
 
 Repo-owned entrypoints can be imported from the `root` mount:
 
@@ -139,14 +128,10 @@ def apply(ctx, rule):
 ```
 
 ```text
-ctx.rel
-ctx.name
 ctx.params
 
-rule.kind
 rule.name
 rule.matches_kind(patterns)
-rule.list_attr(name)
 rule.ensure_list_attr_contains(name, values)
 rule.deps_matching(patterns)
 ```
@@ -176,8 +161,6 @@ def apply(ctx):
 ```
 
 ```text
-ctx.rel
-ctx.name
 ctx.params
 ctx.matching_files(include)
 ctx.rules_matching(kinds)
@@ -209,10 +192,9 @@ stays explicit through `present = False` rather than hiding behind an empty list
 `gazelle_fold.export(...)` is ephemeral: it makes a label visible to ancestor
 folds during this walk but does not mutate a BUILD file directly.
 
-The stock `filegroup_rollup` fold follows the same contract through the stdlib
-`filegroup(...)` helper: it returns local and recursive filegroup outputs, plus a
-`gazelle_fold.export(...)` output only when there is a recursive label for
-ancestors to consume.
+The stock `filegroup_rollup` fold follows the same contract: it returns local
+and recursive filegroup outputs, plus a `gazelle_fold.export(...)` output only
+when there is a recursive label for ancestors to consume.
 
 That declarative boundary is fold-specific on purpose. Folds own a package-level
 desired state, so returning outputs makes the whole package shape visible at
@@ -246,43 +228,7 @@ untouched instead of rebuilding them from partial knowledge.
 ### Starlark library
 
 - stock fold, rewrite, and policy entrypoints
-- tiny output helpers where they remove real call-site noise
 - later helpers only when they earn their keep through repeated use
-
-## The current helper
-
-### `filegroup(...)`
-
-```python
-def filegroup(name, srcs, present = True, visibility = None):
-    ...
-```
-
-This is stdlib sugar over `gazelle_fold.rule(kind = "filegroup", ...)`, not a
-special host concept. It keeps the runtime target-agnostic while giving common
-file-based folds a compact call site. `present = False` expresses deletion
-explicitly, and `visibility` forwards literal BUILD visibility labels when the
-generated target needs them.
-
-## Why `mirror_attr` should still be separate
-
-File aggregation reasons about files and child exports. Attribute mirroring
-reasons about peer rules in one package. Those are different problems even when
-both mention `srcs`.
-
-A future helper can likely be:
-
-```python
-mirror_attr_rewrite(
-    name = "mirror_library_srcs_to_test",
-    from_kind = "rust_library",
-    to_kind = "rust_test",
-    attr = "srcs",
-)
-```
-
-But it should land only after we design the smallest safe package-level peer
-rule read API.
 
 ## Non-goals
 
