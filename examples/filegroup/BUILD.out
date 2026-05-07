@@ -1,0 +1,10 @@
+# gazelle:fold import("docs.star")
+# gazelle:fold use("markdown_docs", scope = "...")
+
+filegroup(
+    name = "docs",
+    srcs = [
+        "README.md",
+        "design.md",
+    ],
+)

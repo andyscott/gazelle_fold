@@ -12,6 +12,7 @@ go_library(
         "types.go",
     ],
     embedsrcs = [
+        "builtins/lib/filegroup.star",
         "builtins/lib/file_rollup.star",
         "builtins/lib/forbidden_deps.star",
         "builtins/lib/required_tags.star",

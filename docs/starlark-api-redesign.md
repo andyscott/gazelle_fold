@@ -85,6 +85,7 @@ These register generic definition names driven entirely by `use(...)` params.
 
 ```python
 load("std:lib/required_tags.star", "required_tags_rewrite")
+load("std:lib/filegroup.star", "filegroup")
 load("std:lib/file_rollup.star", "file_rollup_fold")
 load("std:lib/forbidden_deps.star", "forbidden_deps_policy")
 ```
@@ -109,6 +110,28 @@ forbidden_deps_policy(
     name = "rust_forbidden_deps",
     kinds = ["rust_library", "rust_binary", "rust_test"],
     deny = ["//legacy/..."],
+)
+```
+
+For the lightest-weight package-local synthesis, load the filegroup helper
+directly:
+
+```python
+load("std:lib/filegroup.star", "filegroup")
+
+def apply(ctx):
+    docs = ctx.matching_files(include = ["*.md"])
+    return [
+        filegroup(
+            name = "docs",
+            srcs = docs,
+            present = docs != [],
+        ),
+    ]
+
+gazelle_fold.fold(
+    name = "markdown_docs",
+    apply = apply,
 )
 ```
 
@@ -301,6 +324,19 @@ The stock fold leaves all three fields to `use(...)`. Repo-owned helper calls
 can bake them in as defaults. It is also the clearest example of the fold shape:
 local files become package exports, parent packages combine child exports with
 their own local state, and the recursive target climbs toward the root.
+
+### `filegroup(...)`
+
+```python
+def filegroup(name, srcs, present = True, visibility = None):
+    ...
+```
+
+This is stdlib sugar over `gazelle_fold.rule(kind = "filegroup", ...)`, not a
+special host concept. It keeps the runtime target-agnostic while giving common
+file-based folds a compact call site. `present = False` expresses deletion
+explicitly, and `visibility` forwards literal BUILD visibility labels when the
+generated target needs them.
 
 ### `forbidden_deps_policy(...)`
 

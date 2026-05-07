@@ -21,6 +21,11 @@ policy names.
 files, ancestors combine child exports, and a full walk can build a recursive
 target back toward the root.
 
+`filegroup/` is the smallest direct synthesis example. It loads the stdlib
+`filegroup(...)` helper and keeps one package-local markdown target in sync,
+including removing the managed target when a package no longer owns matching
+files.
+
 `rust_clippy/` is the package-local synthesis example. One activation at the
 subtree root derives a managed `rust_clippy(name = "clippy")` target in every
 package that owns handwritten Rust rules, and removes that managed rule when a

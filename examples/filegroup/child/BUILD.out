@@ -1,0 +1,4 @@
+filegroup(
+    name = "docs",
+    srcs = ["guide.md"],
+)
