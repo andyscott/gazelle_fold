@@ -56,9 +56,9 @@ We keep that seam, but make the product much smaller:
 ## Golden path
 
 ```python
-# gazelle:fold import("std:folds/file_rollup.star")
+# gazelle:fold import("std:folds/filegroup_rollup.star")
 # gazelle:fold import("std:rewrites/required_tags.star")
-# gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:fold use("filegroup_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
 # gazelle:fold use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
 ```
 
@@ -74,7 +74,7 @@ child can override one field without repeating the entire contract:
 ### Importable stock definitions
 
 ```text
-std:folds/file_rollup.star
+std:folds/filegroup_rollup.star
 std:rewrites/required_tags.star
 std:policies/forbidden_deps.star
 ```
@@ -89,26 +89,8 @@ load("std:lib/filegroup.star", "filegroup")
 
 Custom folds, rewrites, and policies are ordinary repo-owned `.star` modules.
 The stdlib keeps only tiny helpers whose call sites stay clearer than raw host
-calls. For package-local filegroup synthesis:
-
-```python
-load("std:lib/filegroup.star", "filegroup")
-
-def apply(ctx):
-    docs = ctx.matching_files(include = ["*.md"])
-    return [
-        filegroup(
-            name = "docs",
-            srcs = docs,
-            present = docs != [],
-        ),
-    ]
-
-gazelle_fold.fold(
-    name = "markdown_docs",
-    apply = apply,
-)
-```
+calls; `filegroup(...)` currently exists to keep the stock rollup implementation
+compact without turning filegroups into a special host concept.
 
 Repo-owned entrypoints can be imported from the `root` mount:
 
@@ -227,10 +209,10 @@ stays explicit through `present = False` rather than hiding behind an empty list
 `gazelle_fold.export(...)` is ephemeral: it makes a label visible to ancestor
 folds during this walk but does not mutate a BUILD file directly.
 
-The stock `file_rollup` fold now follows the same contract through a small local
-helper: it returns `gazelle_fold.rule(...)` outputs for the local and recursive
-filegroups, and a `gazelle_fold.export(...)` output only when there is a recursive
-label for ancestors to consume.
+The stock `filegroup_rollup` fold follows the same contract through the stdlib
+`filegroup(...)` helper: it returns local and recursive filegroup outputs, plus a
+`gazelle_fold.export(...)` output only when there is a recursive label for
+ancestors to consume.
 
 That declarative boundary is fold-specific on purpose. Folds own a package-level
 desired state, so returning outputs makes the whole package shape visible at

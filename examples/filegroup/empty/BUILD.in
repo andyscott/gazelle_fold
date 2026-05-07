@@ -1,4 +1,0 @@
-filegroup(
-    name = "docs",
-    srcs = [":stale"],
-)

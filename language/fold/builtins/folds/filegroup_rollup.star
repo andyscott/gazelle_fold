@@ -16,7 +16,7 @@ def _apply(ctx):
         ),
     ]
 
-    children = ctx.child_exports("file_rollup")
+    children = ctx.child_exports("filegroup_rollup")
     if not children.complete:
         return outputs
 
@@ -36,7 +36,7 @@ def _apply(ctx):
     if recursive_srcs:
         outputs.append(
             gazelle_fold.export(
-                name = "file_rollup",
+                name = "filegroup_rollup",
                 label = ":" + recursive_name,
             ),
         )
@@ -44,7 +44,7 @@ def _apply(ctx):
 
 
 gazelle_fold.fold(
-    name = "file_rollup",
+    name = "filegroup_rollup",
     params = {
         "include": gazelle_fold.param(type = "strings", required = True),
         "local_name": gazelle_fold.param(type = "string", required = True),

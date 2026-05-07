@@ -5,22 +5,21 @@ into ancestor targets, modify local rules, and enforce local invariants. Most
 users can import the built-in stock definitions directly:
 
 ```python
-# gazelle:fold import("std:folds/file_rollup.star")
+# gazelle:fold import("std:folds/filegroup_rollup.star")
 # gazelle:fold import("std:rewrites/required_tags.star")
 # gazelle:fold import("std:policies/forbidden_deps.star")
-# gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:fold use("filegroup_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
 # gazelle:fold use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
 # gazelle:fold use("forbidden_deps", scope = "app/...", kinds = ["rust_library"], deny = ["//legacy/..."])
 ```
 
-`file_rollup` is the most fold-shaped example: each package contributes local
-files, ancestors combine child exports, and a full walk can build a recursive
-target back toward the root.
+`filegroup_rollup` is the canonical fold shape: each package contributes local
+files, ancestors combine child exports, and a full walk builds a recursive target
+back toward the root.
 
-`filegroup/` is the smallest direct synthesis example. It loads the stdlib
-`filegroup(...)` helper and keeps one package-local markdown target in sync,
-including removing the managed target when a package no longer owns matching
-files.
+`filegroup/` is the smallest stock-fold example. It uses `filegroup_rollup` to
+maintain local markdown filegroups and roll a recursive target back toward the
+root.
 
 `rust_clippy/` is the package-local synthesis example. One activation at the
 subtree root derives a managed `rust_clippy(name = "clippy")` target in every

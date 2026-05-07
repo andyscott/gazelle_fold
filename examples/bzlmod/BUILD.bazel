@@ -22,7 +22,7 @@ gazelle(
 )
 
 gazelle_generation_test(
-    name = "file_rollup",
+    name = "filegroup_rollup",
     gazelle_binary = ":gazelle_fold",
-    test_data = glob(["file_rollup/**"]),
+    test_data = glob(["filegroup_rollup/**"]),
 )

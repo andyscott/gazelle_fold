@@ -2,3 +2,9 @@ filegroup(
     name = "docs",
     srcs = ["guide.md"],
 )
+
+filegroup(
+    name = "docs_recursive",
+    srcs = [":docs"],
+    visibility = ["//visibility:public"],
+)

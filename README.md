@@ -12,10 +12,10 @@ keep generated edits aligned with the repo's own build patterns.
 The basic setup is short:
 
 ```python
-# gazelle:fold import("std:folds/file_rollup.star")
+# gazelle:fold import("std:folds/filegroup_rollup.star")
 # gazelle:fold import("std:rewrites/required_tags.star")
 # gazelle:fold import("std:policies/forbidden_deps.star")
-# gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:fold use("filegroup_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
 # gazelle:fold use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
 # gazelle:fold use("forbidden_deps", scope = "app/...", kinds = ["rust_library"], deny = ["//legacy/..."])
 ```
@@ -33,12 +33,12 @@ the parameter it cares about:
 The bundled definitions show the three things the extension can do:
 
 ```text
-file_rollup      fold child exports into ancestor targets
+filegroup_rollup      fold child exports into ancestor targets
 required_tags    modify local targets in place
 forbidden_deps   reject local policy violations
 ```
 
-`file_rollup` is the canonical fold example: leaf packages export local
+`filegroup_rollup` is the canonical fold example: leaf packages export local
 source groups, parents combine child exports with their own local files, and a
 full walk carries the recursive rollup all the way to the root.
 
@@ -59,8 +59,8 @@ app/
 With one directive at the root:
 
 ```python
-# gazelle:fold import("std:folds/file_rollup.star")
-# gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:fold import("std:folds/filegroup_rollup.star")
+# gazelle:fold use("filegroup_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
 ```
 
 the leaf package exports its local files:
@@ -173,41 +173,15 @@ the module language.
 Stock definitions are importable entrypoints for common fold steps and rule hooks:
 
 ```python
-std:folds/file_rollup.star
+std:folds/filegroup_rollup.star
 std:rewrites/required_tags.star
 std:policies/forbidden_deps.star
 ```
 
 For custom behavior, write an ordinary repo-owned `.star` module against the
-host API. The bundled library intentionally keeps only small output helpers
-whose call sites stay clearer than the raw rule form. For example, a
-package-local filegroup fold can use:
-
-```python
-load("std:lib/filegroup.star", "filegroup")
-
-def apply(ctx):
-    docs = ctx.matching_files(include = ["*.md"])
-    return [
-        filegroup(
-            name = "docs",
-            srcs = docs,
-            present = docs != [],
-        ),
-    ]
-
-gazelle_fold.fold(
-    name = "markdown_docs",
-    apply = apply,
-)
-```
-
-Then import the repo-owned entrypoint:
-
-```python
-# gazelle:fold import("root:build/gazelle_fold/rust.star")
-# gazelle:fold use("markdown_docs", scope = "...")
-```
+host API. The bundled library intentionally stays small; use the stock
+definitions when they fit, and drop to custom Starlark only when you need a
+different behavior.
 
 Supported scopes are `"."`, `"..."`, `"bar"`, and `"bar/..."`; they are
 relative to the package containing the directive.
