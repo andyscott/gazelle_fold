@@ -21,7 +21,6 @@ func runRuleDefinition(active effectiveDefinition, rel, file string, r *rule.Rul
 		active.Definition.Apply,
 		starlark.Tuple{
 			&ruleContextValue{
-				rel:             rel,
 				name:            active.Activation.Name,
 				params:          params,
 				file:            file,
@@ -42,17 +41,19 @@ func runRuleDefinition(active effectiveDefinition, rel, file string, r *rule.Rul
 }
 
 func runFold(active effectiveDefinition, ctx *foldContextValue) error {
-	_, err := starlark.Call(
+	returned, err := starlark.Call(
 		&starlark.Thread{Name: "gazelle_fold fold " + active.Activation.Name},
 		active.Definition.Apply,
 		starlark.Tuple{ctx},
 		nil,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return ctx.applyFoldResult(returned)
 }
 
 type ruleContextValue struct {
-	rel             string
 	name            string
 	params          *starlark.Dict
 	file            string
@@ -72,10 +73,6 @@ func (*ruleContextValue) Hash() (uint32, error) {
 
 func (ctx *ruleContextValue) Attr(name string) (starlark.Value, error) {
 	switch name {
-	case "rel":
-		return starlark.String(ctx.rel), nil
-	case "name":
-		return starlark.String(ctx.name), nil
 	case "params":
 		return ctx.params, nil
 	case "report_violation":
@@ -90,9 +87,9 @@ func (ctx *ruleContextValue) Attr(name string) (starlark.Value, error) {
 
 func (ctx *ruleContextValue) AttrNames() []string {
 	if !ctx.allowViolation {
-		return []string{"rel", "name", "params"}
+		return []string{"params"}
 	}
-	return []string{"rel", "name", "params", "report_violation"}
+	return []string{"params", "report_violation"}
 }
 
 type ruleValue struct {
@@ -109,14 +106,10 @@ func (*ruleValue) Hash() (uint32, error) { return 0, fmt.Errorf("rule is unhasha
 
 func (r *ruleValue) Attr(name string) (starlark.Value, error) {
 	switch name {
-	case "kind":
-		return starlark.String(r.rule.Kind()), nil
 	case "name":
 		return starlark.String(r.rule.Name()), nil
 	case "matches_kind":
 		return ruleMatchesKind.BindReceiver(r), nil
-	case "list_attr":
-		return ruleListAttr.BindReceiver(r), nil
 	case "ensure_list_attr_contains":
 		return ruleEnsureListAttrContains.BindReceiver(r), nil
 	case "deps_matching":
@@ -127,7 +120,7 @@ func (r *ruleValue) Attr(name string) (starlark.Value, error) {
 }
 
 func (*ruleValue) AttrNames() []string {
-	return []string{"kind", "name", "matches_kind", "list_attr", "ensure_list_attr_contains", "deps_matching"}
+	return []string{"name", "matches_kind", "ensure_list_attr_contains", "deps_matching"}
 }
 
 var ruleContextReportViolation = starlark.NewBuiltin("report_violation", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -162,19 +155,6 @@ var ruleMatchesKind = starlark.NewBuiltin("matches_kind", func(_ *starlark.Threa
 		return nil, err
 	}
 	return starlark.Bool(matchesAnyKind(values, self.rule.Kind())), nil
-})
-
-var ruleListAttr = starlark.NewBuiltin("list_attr", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	self := fn.Receiver().(*ruleValue)
-	var name string
-	if err := starlark.UnpackArgs("list_attr", args, kwargs, "name", &name); err != nil {
-		return nil, err
-	}
-	values, ok := literalStringListAttr(self.rule.Attr(name))
-	if !ok {
-		return starlark.None, nil
-	}
-	return stringList(values), nil
 })
 
 var ruleEnsureListAttrContains = starlark.NewBuiltin("ensure_list_attr_contains", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -253,29 +233,26 @@ func (*foldContextValue) Hash() (uint32, error) {
 
 func (ctx *foldContextValue) Attr(name string) (starlark.Value, error) {
 	switch name {
-	case "rel":
-		return starlark.String(ctx.args.Rel), nil
-	case "name":
-		return starlark.String(ctx.active.Name), nil
 	case "params":
 		return ctx.params, nil
 	case "matching_files":
 		return packageMatchingFiles.BindReceiver(ctx), nil
-	case "ensure_filegroup":
-		return packageEnsureFilegroup.BindReceiver(ctx), nil
-	case "remove_filegroup":
-		return packageRemoveFilegroup.BindReceiver(ctx), nil
+	case "rules_matching":
+		return packageRulesMatching.BindReceiver(ctx), nil
 	case "child_exports":
 		return packageChildExports.BindReceiver(ctx), nil
-	case "export":
-		return packageExport.BindReceiver(ctx), nil
 	default:
 		return nil, nil
 	}
 }
 
 func (*foldContextValue) AttrNames() []string {
-	return []string{"rel", "name", "params", "matching_files", "ensure_filegroup", "remove_filegroup", "child_exports", "export"}
+	return []string{
+		"params",
+		"matching_files",
+		"rules_matching",
+		"child_exports",
+	}
 }
 
 var packageMatchingFiles = starlark.NewBuiltin("matching_files", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -291,48 +268,159 @@ var packageMatchingFiles = starlark.NewBuiltin("matching_files", func(_ *starlar
 	return stringList(matchingFiles(self.args.RegularFiles, patterns)), nil
 })
 
-var packageEnsureFilegroup = starlark.NewBuiltin("ensure_filegroup", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+var packageRulesMatching = starlark.NewBuiltin("rules_matching", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	self := fn.Receiver().(*foldContextValue)
-	var (
-		name   string
-		srcs   starlark.Value
-		public bool
-	)
-	if err := starlark.UnpackArgs("ensure_filegroup", args, kwargs,
-		"name", &name,
-		"srcs", &srcs,
-		"public?", &public,
-	); err != nil {
+	var kinds starlark.Value
+	if err := starlark.UnpackArgs("rules_matching", args, kwargs, "kinds", &kinds); err != nil {
 		return nil, err
 	}
-	if name == "" {
-		return nil, fmt.Errorf("ensure_filegroup name must not be empty")
-	}
-	values, err := readStringSequence("ensure_filegroup.srcs", srcs)
+	patterns, err := readStringSequence("rules_matching.kinds", kinds)
 	if err != nil {
 		return nil, err
 	}
-	generated := rule.NewRule("filegroup", name)
-	generated.SetAttr("srcs", values)
-	if public && (self.args.File == nil || !self.args.File.HasDefaultVisibility()) {
-		generated.SetAttr("visibility", []string{"//visibility:public"})
+	if self.args.File == nil {
+		return starlark.NewList(nil), nil
 	}
-	self.gen = append(self.gen, generated)
-	return starlark.None, nil
+	rules := make([]starlark.Value, 0, len(self.args.File.Rules))
+	for _, r := range self.args.File.Rules {
+		if !matchesAnyKind(patterns, r.Kind()) {
+			continue
+		}
+		rules = append(rules, &ruleValue{
+			file: self.args.File.Path,
+			pkg:  self.args.Rel,
+			rule: r,
+		})
+	}
+	return starlark.NewList(rules), nil
 })
 
-var packageRemoveFilegroup = starlark.NewBuiltin("remove_filegroup", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	self := fn.Receiver().(*foldContextValue)
-	var name string
-	if err := starlark.UnpackArgs("remove_filegroup", args, kwargs, "name", &name); err != nil {
-		return nil, err
+func (ctx *foldContextValue) applyFoldResult(value starlark.Value) error {
+	if value == nil || value == starlark.None {
+		return nil
 	}
-	if name == "" {
-		return nil, fmt.Errorf("remove_filegroup name must not be empty")
+	var iterable starlark.Iterable
+	switch typed := value.(type) {
+	case *starlark.List:
+		iterable = typed
+	case starlark.Tuple:
+		iterable = typed
+	default:
+		return fmt.Errorf("fold %q must return None or a list or tuple of fold output values", ctx.active.Name)
 	}
-	self.empty = append(self.empty, emptyRule("filegroup", name))
-	return starlark.None, nil
-})
+	iter := iterable.Iterate()
+	defer iter.Done()
+
+	seenRules := make(map[string]struct{})
+	seenExports := make(map[string]struct{})
+	var item starlark.Value
+	for iter.Next(&item) {
+		switch typed := item.(type) {
+		case *managedRuleSpecValue:
+			if err := recordManagedRuleOutput(ctx.active.Name, seenRules, typed.spec.Name); err != nil {
+				return err
+			}
+			if err := ctx.applyManagedRule(typed.spec); err != nil {
+				return err
+			}
+		case *exportSpecValue:
+			if _, exists := seenExports[typed.spec.Name]; exists {
+				return fmt.Errorf("fold %q returned duplicate export %q", ctx.active.Name, typed.spec.Name)
+			}
+			seenExports[typed.spec.Name] = struct{}{}
+			if err := ctx.applyExport(typed.spec); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf(
+				"fold %q returned %s, want gazelle_fold.rule(...) or gazelle_fold.export(...)",
+				ctx.active.Name,
+				item.Type(),
+			)
+		}
+	}
+	return nil
+}
+
+func recordManagedRuleOutput(foldName string, seen map[string]struct{}, name string) error {
+	if _, exists := seen[name]; exists {
+		return fmt.Errorf("fold %q returned duplicate managed rule name %q", foldName, name)
+	}
+	seen[name] = struct{}{}
+	return nil
+}
+
+func (ctx *foldContextValue) applyManagedRule(spec managedRuleSpec) error {
+	if spec.Kind == "filegroup" {
+		// filegroups are native Gazelle-owned rules. Route them through the
+		// generation path so Gazelle can merge and delete them with the same
+		// semantics it already applies to its built-in kinds, while folds still
+		// see one uniform declarative rule output.
+		ctx.applyGeneratedRule(spec)
+		return nil
+	}
+	if !spec.Present {
+		removeManagedRule(ctx.args.File, spec.Kind, spec.Name)
+		return nil
+	}
+	managed, err := ensureManagedRule(ctx.args.File, spec.Kind, spec.Name)
+	if err != nil {
+		return err
+	}
+	setSortedAttrs(managed, spec.Attrs)
+	if ctx.args.File == nil {
+		// New BUILD files do not have an AST to edit yet. Let Gazelle insert the
+		// first managed rule through its normal generation path; later runs will
+		// update the checked-in rule in place.
+		ctx.gen = append(ctx.gen, managed)
+	}
+	return nil
+}
+
+func (ctx *foldContextValue) applyGeneratedRule(spec managedRuleSpec) {
+	if !spec.Present {
+		ctx.empty = append(ctx.empty, emptyRule(spec.Kind, spec.Name))
+		return
+	}
+	generated := rule.NewRule(spec.Kind, spec.Name)
+	setSortedAttrs(generated, spec.Attrs)
+	ctx.gen = append(ctx.gen, generated)
+}
+
+func ensureManagedRule(f *rule.File, kind, name string) (*rule.Rule, error) {
+	if f == nil {
+		return rule.NewRule(kind, name), nil
+	}
+	for _, existing := range f.Rules {
+		if existing.Name() != name {
+			continue
+		}
+		if existing.Kind() != kind {
+			return nil, fmt.Errorf(
+				"cannot ensure %s %q because %s %q already exists",
+				kind,
+				name,
+				existing.Kind(),
+				name,
+			)
+		}
+		return existing, nil
+	}
+	managed := rule.NewRule(kind, name)
+	managed.Insert(f)
+	return managed, nil
+}
+
+func removeManagedRule(f *rule.File, kind, name string) {
+	if f == nil {
+		return
+	}
+	for _, existing := range f.Rules {
+		if existing.Kind() == kind && existing.Name() == name {
+			existing.Delete()
+		}
+	}
+}
 
 var packageChildExports = starlark.NewBuiltin("child_exports", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	self := fn.Receiver().(*foldContextValue)
@@ -348,7 +436,7 @@ var packageChildExports = starlark.NewBuiltin("child_exports", func(_ *starlark.
 			continue
 		}
 		childState, ok := self.lang.foldStates[childRel][self.active.Name]
-		if !ok || !childState.Generated || !childState.Complete {
+		if !ok || !childState.Complete {
 			complete = false
 			continue
 		}
@@ -366,28 +454,14 @@ var packageChildExports = starlark.NewBuiltin("child_exports", func(_ *starlark.
 	}, nil
 })
 
-var packageExport = starlark.NewBuiltin("export", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	self := fn.Receiver().(*foldContextValue)
-	var (
-		name  string
-		label string
-	)
-	if err := starlark.UnpackArgs("export", args, kwargs,
-		"name", &name,
-		"label", &label,
-	); err != nil {
-		return nil, err
-	}
-	if name == "" {
-		return nil, fmt.Errorf("export name must not be empty")
-	}
-	normalized, err := normalizeExportLabel(self.args.Rel, label)
+func (ctx *foldContextValue) applyExport(spec exportSpec) error {
+	normalized, err := normalizeExportLabel(ctx.args.Rel, spec.Label)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	self.exports[name] = normalized
-	return starlark.None, nil
-})
+	ctx.exports[spec.Name] = normalized
+	return nil
+}
 
 type childExportsValue struct {
 	labels   []string
@@ -457,17 +531,16 @@ func stringList(values []string) *starlark.List {
 }
 
 func readStringSequence(name string, value starlark.Value) ([]string, error) {
-	if _, ok := value.(starlark.String); ok {
-		return nil, fmt.Errorf("%s must be a list or tuple of strings", name)
-	}
-	iterable, ok := value.(starlark.Iterable)
-	if !ok {
+	var iterable starlark.Iterable
+	switch typed := value.(type) {
+	case *starlark.List:
+		iterable = typed
+	case starlark.Tuple:
+		iterable = typed
+	default:
 		return nil, fmt.Errorf("%s must be a list or tuple of strings", name)
 	}
 	iter := iterable.Iterate()
-	if iter == nil {
-		return nil, fmt.Errorf("%s must be a list or tuple of strings", name)
-	}
 	defer iter.Done()
 
 	var out []string
@@ -480,6 +553,54 @@ func readStringSequence(name string, value starlark.Value) ([]string, error) {
 		out = append(out, str)
 	}
 	return out, nil
+}
+
+func readManagedAttrs(api string, value starlark.Value) (map[string]any, error) {
+	if value == nil || value == starlark.None {
+		return nil, nil
+	}
+	dict, ok := value.(*starlark.Dict)
+	if !ok {
+		return nil, fmt.Errorf("%s must be a dict", api)
+	}
+	out := make(map[string]any, dict.Len())
+	for _, item := range dict.Items() {
+		key, ok := starlark.AsString(item[0])
+		if !ok {
+			return nil, fmt.Errorf("%s keys must be strings", api)
+		}
+		parsed, err := readManagedAttrValue(fmt.Sprintf("%s[%q]", api, key), item[1])
+		if err != nil {
+			return nil, err
+		}
+		out[key] = parsed
+	}
+	return out, nil
+}
+
+func readManagedAttrValue(name string, value starlark.Value) (any, error) {
+	switch typed := value.(type) {
+	case starlark.Bool:
+		return bool(typed), nil
+	case starlark.String:
+		return string(typed), nil
+	case *starlark.List:
+		return readStringSequence(name, typed)
+	case starlark.Tuple:
+		return readStringSequence(name, typed)
+	}
+	return nil, fmt.Errorf("%s must be a bool, string, or list or tuple of strings", name)
+}
+
+func setSortedAttrs(r *rule.Rule, attrs map[string]any) {
+	names := make([]string, 0, len(attrs))
+	for name := range attrs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		r.SetAttr(name, attrs[name])
+	}
 }
 
 func normalizeExportLabel(rel, label string) (string, error) {

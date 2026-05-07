@@ -12,10 +12,7 @@ go_library(
         "types.go",
     ],
     embedsrcs = [
-        "builtins/lib/file_rollup.star",
-        "builtins/lib/forbidden_deps.star",
-        "builtins/lib/required_tags.star",
-        "builtins/folds/file_rollup.star",
+        "builtins/folds/filegroup_rollup.star",
         "builtins/policies/forbidden_deps.star",
         "builtins/rewrites/required_tags.star",
     ],
@@ -40,6 +37,8 @@ go_test(
     embed = [":fold"],
     deps = [
         "@gazelle//config",
+        "@gazelle//language",
         "@gazelle//rule",
+        "@net_starlark_go//starlark",
     ],
 )

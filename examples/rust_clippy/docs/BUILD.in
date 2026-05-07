@@ -1,0 +1,8 @@
+filegroup(
+    name = "docs",
+)
+
+rust_clippy(
+    name = "clippy",
+    deps = [":stale"],
+)

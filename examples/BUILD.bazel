@@ -1,1 +1,13 @@
-exports_files(["definitions.star"])
+load("@gazelle//:def.bzl", "gazelle_generation_test")
+
+gazelle_generation_test(
+    name = "filegroup",
+    gazelle_binary = "//:gazelle_fold",
+    test_data = glob(["filegroup/**"]),
+)
+
+gazelle_generation_test(
+    name = "rust_clippy",
+    gazelle_binary = "//:gazelle_fold",
+    test_data = glob(["rust_clippy/**"]),
+)

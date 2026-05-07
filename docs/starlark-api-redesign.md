@@ -15,14 +15,13 @@ pull machine-authored edits back toward the project's own patterns.
 
 ## Recommendation
 
-The public surface should have four layers:
+The public surface should stay this small:
 
 ```text
 BUILD directives       activate named definitions by package scope
 std:folds/*            ready-made folds users can import directly
 std:rewrites/*         ready-made rewrites users can import directly
 std:policies/*         ready-made policies users can import directly
-std:lib/*              helper factories for repo-owned modules
 gazelle_fold host      a tiny safe runtime for custom folds, rewrites, and policies
 ```
 
@@ -47,7 +46,6 @@ language. Aspect Gazelle's Orion model showed the better seam: real modules,
 We keep that seam, but make the product much smaller:
 
 - stock definitions are importable directly
-- helper modules are explicit and always loadable
 - user-authored modules are normal mounted files
 - the Go host owns the unsafe BUILD/Gazelle machinery
 - the central abstraction is still the BUILD-tree fold, not a miniature general
@@ -56,9 +54,9 @@ We keep that seam, but make the product much smaller:
 ## Golden path
 
 ```python
-# gazelle:fold import("std:folds/file_rollup.star")
+# gazelle:fold import("std:folds/filegroup_rollup.star")
 # gazelle:fold import("std:rewrites/required_tags.star")
-# gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:fold use("filegroup_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
 # gazelle:fold use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
 ```
 
@@ -74,43 +72,14 @@ child can override one field without repeating the entire contract:
 ### Importable stock definitions
 
 ```text
-std:folds/file_rollup.star
+std:folds/filegroup_rollup.star
 std:rewrites/required_tags.star
 std:policies/forbidden_deps.star
 ```
 
 These register generic definition names driven entirely by `use(...)` params.
 
-### Loadable helper library
-
-```python
-load("std:lib/required_tags.star", "required_tags_rewrite")
-load("std:lib/file_rollup.star", "file_rollup_fold")
-load("std:lib/forbidden_deps.star", "forbidden_deps_policy")
-```
-
-These let a repo define opinionated names and defaults without vendoring helper
-code:
-
-```python
-required_tags_rewrite(
-    name = "rust_required_tags",
-    kinds = ["rust_library", "rust_binary", "rust_test"],
-)
-
-file_rollup_fold(
-    name = "rust_files",
-    include = ["*.rs", "BUILD.bazel"],
-    local_name = "all_sources",
-    recursive_name = "all_sources_recursive",
-)
-
-forbidden_deps_policy(
-    name = "rust_forbidden_deps",
-    kinds = ["rust_library", "rust_binary", "rust_test"],
-    deny = ["//legacy/..."],
-)
-```
+Custom folds, rewrites, and policies are ordinary repo-owned `.star` modules.
 
 Repo-owned entrypoints can be imported from the `root` mount:
 
@@ -132,6 +101,8 @@ gazelle_fold.param(type, required = False, default = None)
 gazelle_fold.fold(name, params = {}, apply = fn)
 gazelle_fold.rewrite(name, params = {}, apply = fn)
 gazelle_fold.policy(name, params = {}, apply = fn)
+gazelle_fold.rule(kind, name, present = True, attrs = {})
+gazelle_fold.export(name, label)
 ```
 
 `params` is a schema, not a loose bag. The host rejects:
@@ -157,14 +128,10 @@ def apply(ctx, rule):
 ```
 
 ```text
-ctx.rel
-ctx.name
 ctx.params
 
-rule.kind
 rule.name
 rule.matches_kind(patterns)
-rule.list_attr(name)
 rule.ensure_list_attr_contains(name, values)
 rule.deps_matching(patterns)
 ```
@@ -194,18 +161,46 @@ def apply(ctx):
 ```
 
 ```text
-ctx.rel
-ctx.name
 ctx.params
 ctx.matching_files(include)
-ctx.ensure_filegroup(name, srcs, public = False)
-ctx.remove_filegroup(name)
+ctx.rules_matching(kinds)
 ctx.child_exports(name)
-ctx.export(name, label)
 ```
 
-`ensure_filegroup(...)` and `remove_filegroup(...)` are separate on purpose:
-empty `srcs` is a legitimate Bazel value and should not secretly mean delete.
+Fold callbacks describe package outputs declaratively:
+
+```python
+def apply(ctx):
+    deps = [":" + rule.name for rule in ctx.rules_matching(["rust_library"])]
+    return [
+        gazelle_fold.rule(
+            kind = "rust_clippy",
+            name = "clippy",
+            present = deps != [],
+            attrs = {"deps": deps},
+        ),
+    ]
+```
+
+Returned `gazelle_fold.rule(...)` values declare one managed output's desired
+presence regardless of rule kind. The host reconciles `present = True` and
+`present = False`; omission is deliberately a no-op so a fold cannot accidentally
+delete a package rule it never named. `attrs` accepts literal bools, strings, and
+lists or tuples of strings. For example, `filegroup` is just another rule kind
+whose `srcs` live in `attrs`; `srcs = []` is still a valid value, so deletion
+stays explicit through `present = False` rather than hiding behind an empty list.
+`gazelle_fold.export(...)` is ephemeral: it makes a label visible to ancestor
+folds during this walk but does not mutate a BUILD file directly.
+
+The stock `filegroup_rollup` fold follows the same contract: it returns local
+and recursive filegroup outputs, plus a `gazelle_fold.export(...)` output only
+when there is a recursive label for ancestors to consume.
+
+That declarative boundary is fold-specific on purpose. Folds own a package-level
+desired state, so returning outputs makes the whole package shape visible at
+once. Rewrites and policies already run at the natural one-rule boundary, where
+`rule.ensure_list_attr_contains(...)` and `ctx.report_violation(...)` stay
+smaller and clearer than inventing patch or violation result objects.
 
 `ctx.child_exports(name)` returns:
 
@@ -233,75 +228,7 @@ untouched instead of rebuilding them from partial knowledge.
 ### Starlark library
 
 - stock fold, rewrite, and policy entrypoints
-- reusable definition families
-- parameter defaults and small compositions
-- later helpers such as `mirror_attr_rewrite(...)`
-
-## The current helpers
-
-### `required_tags_rewrite(...)`
-
-```python
-def required_tags_rewrite(name, kinds = None, tags = []):
-    def _apply(ctx, rule):
-        active_kinds = ctx.params["kinds"] if kinds == None else kinds
-        if not rule.matches_kind(active_kinds):
-            return
-        rule.ensure_list_attr_contains(
-            name = "tags",
-            values = ctx.params.get("tags", tags),
-        )
-```
-
-When `kinds` is omitted, the helper declares it as a required activation param.
-When `kinds` is supplied, it becomes an opinionated helper with fewer required
-call-site arguments.
-
-### `file_rollup_fold(...)`
-
-```python
-def file_rollup_fold(name, include = None, local_name = None, recursive_name = None):
-    ...
-```
-
-The stock fold leaves all three fields to `use(...)`. Repo-owned helper calls
-can bake them in as defaults. It is also the clearest example of the fold shape:
-local files become package exports, parent packages combine child exports with
-their own local state, and the recursive target climbs toward the root.
-
-### `forbidden_deps_policy(...)`
-
-```python
-def forbidden_deps_policy(name, kinds = None, deny = None):
-    ...
-```
-
-This reports direct dependency labels from literal `deps` lists and fails the
-Gazelle run before files are written. `deny` accepts absolute label patterns such
-as `//legacy:old` and package-subtree patterns such as `//legacy/...`. The host
-normalizes relative deps before matching so `:old` inside package `legacy` is
-covered by `//legacy/...`. Non-literal `deps` expressions fail closed because the
-host cannot validate them safely.
-
-## Why `mirror_attr` should still be separate
-
-File aggregation reasons about files and child exports. Attribute mirroring
-reasons about peer rules in one package. Those are different problems even when
-both mention `srcs`.
-
-A future helper can likely be:
-
-```python
-mirror_attr_rewrite(
-    name = "mirror_library_srcs_to_test",
-    from_kind = "rust_library",
-    to_kind = "rust_test",
-    attr = "srcs",
-)
-```
-
-But it should land only after we design the smallest safe package-level peer
-rule read API.
+- later helpers only when they earn their keep through repeated use
 
 ## Non-goals
 

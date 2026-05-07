@@ -1,0 +1,19 @@
+# gazelle:fold import("std:folds/filegroup_rollup.star")
+# gazelle:fold use("filegroup_rollup", scope = "...", include = ["*.md"], local_name = "docs", recursive_name = "docs_recursive")
+
+filegroup(
+    name = "docs",
+    srcs = [
+        "README.md",
+        "design.md",
+    ],
+)
+
+filegroup(
+    name = "docs_recursive",
+    srcs = [
+        ":docs",
+        "//child:docs_recursive",
+    ],
+    visibility = ["//visibility:public"],
+)

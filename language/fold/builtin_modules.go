@@ -6,7 +6,7 @@ import (
 	"path"
 )
 
-//go:embed builtins/folds/*.star builtins/lib/*.star builtins/policies/*.star builtins/rewrites/*.star
+//go:embed builtins/folds/*.star builtins/policies/*.star builtins/rewrites/*.star
 var builtinModuleFS embed.FS
 
 func builtinModuleSource(modulePath string) ([]byte, error) {

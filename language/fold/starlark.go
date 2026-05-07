@@ -44,7 +44,7 @@ type starlarkLoader struct {
 	predeclared starlark.StringDict
 }
 
-func loadPolicyFile(repoRoot, packageRel, spec string) (map[string]definition, error) {
+func loadDefinitionFile(repoRoot, packageRel, spec string) (map[string]definition, error) {
 	loader := newStarlarkLoader(repoRoot)
 	base := moduleID{
 		Mount: "root",
@@ -74,6 +74,8 @@ func newStarlarkLoader(repoRoot string) *starlarkLoader {
 				"fold":    starlark.NewBuiltin("gazelle_fold.fold", loader.foldBuiltin),
 				"rewrite": starlark.NewBuiltin("gazelle_fold.rewrite", loader.rewriteBuiltin),
 				"policy":  starlark.NewBuiltin("gazelle_fold.policy", loader.policyBuiltin),
+				"rule":    starlark.NewBuiltin("gazelle_fold.rule", loader.ruleBuiltin),
+				"export":  starlark.NewBuiltin("gazelle_fold.export", loader.exportBuiltin),
 			},
 		),
 	}
@@ -230,6 +232,59 @@ func (l *starlarkLoader) foldBuiltin(_ *starlark.Thread, _ *starlark.Builtin, ar
 	return l.registerDefinition("gazelle_fold.fold", "fold", kindFold, 1, args, kwargs)
 }
 
+func (l *starlarkLoader) ruleBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var (
+		kind    string
+		name    string
+		present = true
+		attrs   starlark.Value
+	)
+	if err := starlark.UnpackArgs("gazelle_fold.rule", args, kwargs,
+		"kind", &kind,
+		"name", &name,
+		"present?", &present,
+		"attrs?", &attrs,
+	); err != nil {
+		return nil, err
+	}
+	if kind == "" {
+		return nil, fmt.Errorf("gazelle_fold.rule kind must not be empty")
+	}
+	if name == "" {
+		return nil, fmt.Errorf("gazelle_fold.rule name must not be empty")
+	}
+	parsedAttrs, err := readManagedAttrs("gazelle_fold.rule.attrs", attrs)
+	if err != nil {
+		return nil, err
+	}
+	return &managedRuleSpecValue{spec: managedRuleSpec{
+		Kind:    kind,
+		Name:    name,
+		Present: present,
+		Attrs:   parsedAttrs,
+	}}, nil
+}
+
+func (l *starlarkLoader) exportBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var (
+		name  string
+		label string
+	)
+	if err := starlark.UnpackArgs("gazelle_fold.export", args, kwargs,
+		"name", &name,
+		"label", &label,
+	); err != nil {
+		return nil, err
+	}
+	if name == "" {
+		return nil, fmt.Errorf("gazelle_fold.export name must not be empty")
+	}
+	return &exportSpecValue{spec: exportSpec{
+		Name:  name,
+		Label: label,
+	}}, nil
+}
+
 func (l *starlarkLoader) registerDefinition(apiName, kindName string, kind definitionKind, arity int, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		name   string
@@ -257,7 +312,6 @@ func (l *starlarkLoader) registerDefinition(apiName, kindName string, kind defin
 		return nil, fmt.Errorf("definition %q is already registered", name)
 	}
 	l.definitions[name] = definition{
-		Name:   name,
 		Kind:   kind,
 		Params: paramSpecs,
 		Apply:  apply,
@@ -274,6 +328,28 @@ func (*paramSpecValue) Type() string          { return "param" }
 func (*paramSpecValue) Freeze()               {}
 func (*paramSpecValue) Truth() starlark.Bool  { return starlark.True }
 func (*paramSpecValue) Hash() (uint32, error) { return 0, fmt.Errorf("param is unhashable") }
+
+type managedRuleSpecValue struct {
+	spec managedRuleSpec
+}
+
+func (*managedRuleSpecValue) String() string       { return "rule(...)" }
+func (*managedRuleSpecValue) Type() string         { return "rule_spec" }
+func (*managedRuleSpecValue) Freeze()              {}
+func (*managedRuleSpecValue) Truth() starlark.Bool { return starlark.True }
+func (*managedRuleSpecValue) Hash() (uint32, error) {
+	return 0, fmt.Errorf("rule spec is unhashable")
+}
+
+type exportSpecValue struct {
+	spec exportSpec
+}
+
+func (*exportSpecValue) String() string        { return "export(...)" }
+func (*exportSpecValue) Type() string          { return "export_spec" }
+func (*exportSpecValue) Freeze()               {}
+func (*exportSpecValue) Truth() starlark.Bool  { return starlark.True }
+func (*exportSpecValue) Hash() (uint32, error) { return 0, fmt.Errorf("export spec is unhashable") }
 
 func unpackParamSpecs(dict *starlark.Dict) (map[string]paramSpec, error) {
 	if dict == nil || dict.Len() == 0 {
@@ -296,9 +372,7 @@ func unpackParamSpecs(dict *starlark.Dict) (map[string]paramSpec, error) {
 		if !ok {
 			return nil, fmt.Errorf("definition param %q must be declared with gazelle_fold.param(...)", name)
 		}
-		spec := value.spec
-		spec.Name = name
-		out[name] = spec
+		out[name] = value.spec
 	}
 	return out, nil
 }

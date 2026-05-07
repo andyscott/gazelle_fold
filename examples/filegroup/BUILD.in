@@ -1,0 +1,2 @@
+# gazelle:fold import("std:folds/filegroup_rollup.star")
+# gazelle:fold use("filegroup_rollup", scope = "...", include = ["*.md"], local_name = "docs", recursive_name = "docs_recursive")

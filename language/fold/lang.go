@@ -60,13 +60,13 @@ func (*foldLang) Configure(c *config.Config, rel string, f *rule.File) {
 		}
 		switch parsed.Kind {
 		case directiveImport:
-			definitions, err := loadPolicyFile(c.RepoRoot, rel, parsed.Label)
+			definitions, err := loadDefinitionFile(c.RepoRoot, rel, parsed.Label)
 			if err != nil {
 				log.Printf("%s: loading %s: %v", f.Path, parsed.Label, err)
 				continue
 			}
 			if len(definitions) == 0 {
-				log.Printf("%s: import %s registered no policies", f.Path, parsed.Label)
+				log.Printf("%s: import %s registered no definitions", f.Path, parsed.Label)
 			}
 			for name, def := range definitions {
 				cfg.Definitions[name] = def
@@ -115,7 +115,7 @@ func (l *foldLang) Fix(c *config.Config, f *rule.File) {
 func (l *foldLang) GenerateRules(args language.GenerateArgs) language.GenerateResult {
 	cfg := currentConfig(args.Config)
 	var result language.GenerateResult
-	for _, active := range effectivePolicies(cfg, args.Rel) {
+	for _, active := range effectiveDefinitions(cfg, args.Rel) {
 		if active.Definition.Kind != kindFold {
 			continue
 		}
@@ -137,9 +137,8 @@ func (l *foldLang) GenerateRules(args language.GenerateArgs) language.GenerateRe
 			l.foldStates[args.Rel] = make(map[string]foldState)
 		}
 		l.foldStates[args.Rel][active.Activation.Name] = foldState{
-			Generated: true,
-			Complete:  ctx.complete,
-			Exports:   cloneExports(ctx.exports),
+			Complete: ctx.complete,
+			Exports:  cloneExports(ctx.exports),
 		}
 	}
 	return result
@@ -270,7 +269,7 @@ func validateDirectiveParam(name string, typ paramType, value any) error {
 	return nil
 }
 
-func effectivePolicies(cfg *foldConfig, rel string) []effectiveDefinition {
+func effectiveDefinitions(cfg *foldConfig, rel string) []effectiveDefinition {
 	covering := make(map[string][]activation)
 	for _, act := range cfg.Activations {
 		if !act.Scope.covers(act.Origin, rel) {
@@ -302,7 +301,7 @@ func effectivePolicies(cfg *foldConfig, rel string) []effectiveDefinition {
 
 func effectiveRuleDefinitions(cfg *foldConfig, rel string, kind definitionKind) []effectiveDefinition {
 	var out []effectiveDefinition
-	for _, active := range effectivePolicies(cfg, rel) {
+	for _, active := range effectiveDefinitions(cfg, rel) {
 		if active.Definition.Kind == kind {
 			out = append(out, active)
 		}

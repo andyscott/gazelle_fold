@@ -43,14 +43,12 @@ const (
 )
 
 type paramSpec struct {
-	Name     string
 	Type     paramType
 	Required bool
 	Default  any
 }
 
 type definition struct {
-	Name   string
 	Kind   definitionKind
 	Params map[string]paramSpec
 	Apply  *starlark.Function
@@ -71,9 +69,20 @@ type foldConfig struct {
 }
 
 type foldState struct {
-	Generated bool
-	Complete  bool
-	Exports   map[string]string
+	Complete bool
+	Exports  map[string]string
+}
+
+type managedRuleSpec struct {
+	Kind    string
+	Name    string
+	Present bool
+	Attrs   map[string]any
+}
+
+type exportSpec struct {
+	Name  string
+	Label string
 }
 
 type policyViolation struct {
@@ -186,7 +195,8 @@ func (c *foldConfig) addActivation(name, origin string, scope packageScope, para
 }
 
 // emptyRule is intentionally tiny: generated empties let Gazelle delete stale
-// filegroups without us needing to own Bazel's native filegroup kind.
+// native rules such as filegroups without folds needing a separate public API
+// for Bazel-owned kinds.
 func emptyRule(kind, name string) *rule.Rule {
 	return rule.NewRule(kind, name)
 }

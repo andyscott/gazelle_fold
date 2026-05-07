@@ -1,0 +1,19 @@
+rust_library(
+    name = "child_lib",
+    srcs = ["lib.rs"],
+)
+
+rust_test(
+    name = "child_tests",
+    srcs = ["tests.rs"],
+)
+
+rust_clippy(
+    name = "clippy",
+    testonly = True,
+    tags = ["clippy"],
+    deps = [
+        ":child_lib",
+        ":child_tests",
+    ],
+)

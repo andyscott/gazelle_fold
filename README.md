@@ -12,10 +12,10 @@ keep generated edits aligned with the repo's own build patterns.
 The basic setup is short:
 
 ```python
-# gazelle:fold import("std:folds/file_rollup.star")
+# gazelle:fold import("std:folds/filegroup_rollup.star")
 # gazelle:fold import("std:rewrites/required_tags.star")
 # gazelle:fold import("std:policies/forbidden_deps.star")
-# gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:fold use("filegroup_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
 # gazelle:fold use("required_tags", scope = "...", kinds = ["rust_library"], tags = ["team:runtime"])
 # gazelle:fold use("forbidden_deps", scope = "app/...", kinds = ["rust_library"], deny = ["//legacy/..."])
 ```
@@ -33,12 +33,12 @@ the parameter it cares about:
 The bundled definitions show the three things the extension can do:
 
 ```text
-file_rollup      fold child exports into ancestor targets
+filegroup_rollup      fold child exports into ancestor targets
 required_tags    modify local targets in place
 forbidden_deps   reject local policy violations
 ```
 
-`file_rollup` is the canonical fold example: leaf packages export local
+`filegroup_rollup` is the canonical fold example: leaf packages export local
 source groups, parents combine child exports with their own local files, and a
 full walk carries the recursive rollup all the way to the root.
 
@@ -59,8 +59,8 @@ app/
 With one directive at the root:
 
 ```python
-# gazelle:fold import("std:folds/file_rollup.star")
-# gazelle:fold use("file_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
+# gazelle:fold import("std:folds/filegroup_rollup.star")
+# gazelle:fold use("filegroup_rollup", scope = "...", include = ["*.rs", "BUILD.bazel"], local_name = "all_sources", recursive_name = "all_sources_recursive")
 ```
 
 the leaf package exports its local files:
@@ -150,6 +150,10 @@ For a tiny repo that consumes `gazelle_fold` as a dependency instead of as the
 root module, see [`examples/bzlmod`](examples/bzlmod). CI runs that module
 separately so the public integration path stays honest.
 
+For a package-local rule synthesis example, see
+[`examples/rust_clippy`](examples/rust_clippy). It keeps one managed Clippy
+target per Rust package from a single root activation.
+
 ## Module paths
 
 Modules resolve through a small mount table:
@@ -169,45 +173,15 @@ the module language.
 Stock definitions are importable entrypoints for common fold steps and rule hooks:
 
 ```python
-std:folds/file_rollup.star
+std:folds/filegroup_rollup.star
 std:rewrites/required_tags.star
 std:policies/forbidden_deps.star
 ```
 
-If you want repo-specific names or defaults, load the bundled helper library
-from your own `.star` entrypoint:
-
-```python
-load("std:lib/file_rollup.star", "file_rollup_fold")
-load("std:lib/forbidden_deps.star", "forbidden_deps_policy")
-load("std:lib/required_tags.star", "required_tags_rewrite")
-
-required_tags_rewrite(
-    name = "rust_required_tags",
-    kinds = ["rust_library", "rust_binary", "rust_test"],
-)
-
-file_rollup_fold(
-    name = "rust_files",
-    local_name = "all_sources",
-    recursive_name = "all_sources_recursive",
-    include = ["*.rs", "BUILD.bazel"],
-)
-
-forbidden_deps_policy(
-    name = "rust_forbidden_deps",
-    kinds = ["rust_library", "rust_binary", "rust_test"],
-    deny = ["//legacy/..."],
-)
-```
-
-Then import the repo-owned entrypoint:
-
-```python
-# gazelle:fold import("root:build/gazelle_fold/rust.star")
-# gazelle:fold use("rust_required_tags", scope = "...", tags = ["team:runtime"])
-# gazelle:fold use("rust_files", scope = "...")
-```
+For custom behavior, write an ordinary repo-owned `.star` module against the
+host API. The bundled library intentionally stays small; use the stock
+definitions when they fit, and drop to custom Starlark only when you need a
+different behavior.
 
 Supported scopes are `"."`, `"..."`, `"bar"`, and `"bar/..."`; they are
 relative to the package containing the directive.
@@ -223,13 +197,15 @@ rust_library(
 
 ## Starlark host API
 
-The built-in library is ordinary Starlark layered over a deliberately small host:
+The bundled modules are ordinary Starlark layered over a deliberately small host:
 
 ```python
 gazelle_fold.param(type, required = False, default = None)
 gazelle_fold.fold(name, params = {}, apply = fn)
 gazelle_fold.rewrite(name, params = {}, apply = fn)
 gazelle_fold.policy(name, params = {}, apply = fn)
+gazelle_fold.rule(kind, name, present = True, attrs = {})
+gazelle_fold.export(name, label)
 ```
 
 Fold callbacks receive `(ctx)`. Rewrites and policies receive `(ctx, rule)`.
@@ -238,23 +214,27 @@ ancestors. Rewrites change local rules. Policies report violations and can fail
 the run.
 
 ```text
-rule.kind
 rule.name
 rule.matches_kind(patterns)
-rule.list_attr(name)
 rule.ensure_list_attr_contains(name, values)
 rule.deps_matching(patterns)
 
-ctx.rel
-ctx.name
 ctx.params
 ctx.matching_files(include)
-ctx.ensure_filegroup(name, srcs, public = False)
-ctx.remove_filegroup(name)
+ctx.rules_matching(kinds)
 ctx.child_exports(name)
-ctx.export(name, label)
 ctx.report_violation(message)  # policies only
 ```
+
+Fold callbacks return package outputs such as `gazelle_fold.rule(...)` and
+`gazelle_fold.export(...)`. `rule(...)` covers every emitted target kind,
+including native kinds such as `filegroup`, so folds describe one target shape
+instead of choosing between target-specific constructors. `attrs` accepts literal
+bools, strings, and lists or tuples of strings. Managed rules declare whether
+they should be present, so the host owns the ensure/remove machinery and fold
+authors describe the final BUILD shape instead of scripting mutations. Omitting a
+managed output is a no-op; explicit absence keeps deletion ownership local and
+prevents a fold from silently claiming unrelated package rules.
 
 `params` is a real definition contract: unknown names, missing required params,
 and wrong types are rejected instead of silently falling through.
@@ -264,8 +244,8 @@ and wrong types are rejected instead of silently falling through.
 - Directive comments use a tiny one-command language, not general Starlark.
 - The built-in mount table exposes `std` and `root`; user-configured mounts are
   not surfaced yet.
-- The host currently exposes safe string-list edits and filegroup generation,
-  not arbitrary BUILD AST mutation.
+- The host exposes safe string-list edits plus declarative package outputs, not
+  arbitrary BUILD AST mutation.
 - `required_tags` only rewrites literal string-list attributes; complex
   `select(...)`-style expressions are skipped rather than guessed at.
 - `forbidden_deps` reports direct labels from literal `deps` lists and fails the
