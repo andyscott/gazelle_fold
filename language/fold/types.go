@@ -77,18 +77,10 @@ type foldState struct {
 }
 
 type managedRuleSpec struct {
-	Kind            string
-	Name            string
-	Present         bool
-	BoolAttrs       map[string]bool
-	StringListAttrs map[string][]string
-}
-
-type managedFilegroupSpec struct {
+	Kind    string
 	Name    string
-	Srcs    []string
 	Present bool
-	Public  bool
+	Attrs   map[string]any
 }
 
 type exportSpec struct {
@@ -206,7 +198,8 @@ func (c *foldConfig) addActivation(name, origin string, scope packageScope, para
 }
 
 // emptyRule is intentionally tiny: generated empties let Gazelle delete stale
-// filegroups without us needing to own Bazel's native filegroup kind.
+// native rules such as filegroups without folds needing a separate public API
+// for Bazel-owned kinds.
 func emptyRule(kind, name string) *rule.Rule {
 	return rule.NewRule(kind, name)
 }

@@ -26,8 +26,8 @@ def rust_clippy_fold(name, kinds = None, target_name = "clippy"):
                 kind = "rust_clippy",
                 name = active_target_name,
                 present = deps != [],
-                bool_attrs = {"testonly": True},
-                string_list_attrs = {
+                attrs = {
+                    "testonly": True,
                     "deps": deps,
                     "tags": ["clippy"],
                 },

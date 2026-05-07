@@ -252,8 +252,9 @@ def _apply(ctx):
         gazelle_fold.rule(
             kind = "rust_clippy",
             name = "clippy",
-            bool_attrs = {"testonly": True},
-            string_list_attrs = {
+            attrs = {
+                "edition": "2024",
+                "testonly": True,
                 "deps": [":lib"],
                 "tags": ["clippy"],
             },
@@ -310,6 +311,9 @@ rust_clippy(
 	}
 	if got, want := managed.AttrStrings("tags"), []string{"clippy"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("managed tags = %#v, want %#v", got, want)
+	}
+	if got, want := managed.AttrString("edition"), "2024"; got != want {
+		t.Fatalf("managed edition = %q, want %q", got, want)
 	}
 	if !managed.AttrBool("testonly") {
 		t.Fatal("managed rule missing testonly = True")
@@ -443,17 +447,146 @@ filegroup(
 	}
 }
 
-func TestRuleConstructorReservesFilegroupsForSpecializedOutput(t *testing.T) {
+func TestFoldRejectsDuplicateManagedRuleNames(t *testing.T) {
+	root := t.TempDir()
+	writePolicyFile(t, root, "managed.star", `
+def _apply(ctx):
+    return [
+        gazelle_fold.rule(
+            kind = "filegroup",
+            name = "shared_name",
+            attrs = {"srcs": ["README.md"]},
+        ),
+        gazelle_fold.rule(
+            kind = "rust_clippy",
+            name = "shared_name",
+        ),
+    ]
+
+gazelle_fold.fold(
+    name = "managed",
+    apply = _apply,
+)
+`)
+	definitions, err := loadPolicyFile(root, "", "managed.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := effectiveDefinition{
+		Activation: activation{Name: "managed"},
+		Definition: definitions["managed"],
+	}
+	ctx, err := newFoldContextValue(nil, language.GenerateArgs{Rel: "pkg"}, active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runFold(active, ctx)
+	if err == nil {
+		t.Fatal("runFold unexpectedly accepted duplicate managed rule names")
+	}
+	if got, want := err.Error(), `fold "managed" returned duplicate managed rule name "shared_name"`; got != want {
+		t.Fatalf("runFold error = %q, want %q", got, want)
+	}
+}
+
+func TestFoldCanReturnDeclarativeFilegroupsThroughRule(t *testing.T) {
+	root := t.TempDir()
+	writePolicyFile(t, root, "managed.star", `
+def _apply(ctx):
+    return [
+        gazelle_fold.rule(
+            kind = "filegroup",
+            name = "files",
+            attrs = {"srcs": ["README.md"]},
+        ),
+    ]
+
+gazelle_fold.fold(
+    name = "files",
+    apply = _apply,
+)
+`)
+	definitions, err := loadPolicyFile(root, "", "managed.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := effectiveDefinition{
+		Activation: activation{Name: "files"},
+		Definition: definitions["files"],
+	}
+	ctx, err := newFoldContextValue(nil, language.GenerateArgs{Rel: "pkg"}, active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runFold(active, ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(ctx.gen), 1; got != want {
+		t.Fatalf("generated rules = %d, want %d", got, want)
+	}
+	if got, want := ctx.gen[0].Kind(), "filegroup"; got != want {
+		t.Fatalf("generated kind = %q, want %q", got, want)
+	}
+	if got, want := ctx.gen[0].AttrStrings("srcs"), []string{"README.md"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("generated srcs = %#v, want %#v", got, want)
+	}
+}
+
+func TestFoldCanRemoveDeclarativeFilegroupsThroughRule(t *testing.T) {
+	root := t.TempDir()
+	writePolicyFile(t, root, "managed.star", `
+def _apply(ctx):
+    return [
+        gazelle_fold.rule(
+            kind = "filegroup",
+            name = "files",
+            present = False,
+        ),
+    ]
+
+gazelle_fold.fold(
+    name = "files",
+    apply = _apply,
+)
+`)
+	definitions, err := loadPolicyFile(root, "", "managed.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := effectiveDefinition{
+		Activation: activation{Name: "files"},
+		Definition: definitions["files"],
+	}
+	ctx, err := newFoldContextValue(nil, language.GenerateArgs{Rel: "pkg"}, active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runFold(active, ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(ctx.empty), 1; got != want {
+		t.Fatalf("empty rules = %d, want %d", got, want)
+	}
+	if got, want := ctx.empty[0].Kind(), "filegroup"; got != want {
+		t.Fatalf("empty kind = %q, want %q", got, want)
+	}
+	if got, want := ctx.empty[0].Name(), "files"; got != want {
+		t.Fatalf("empty name = %q, want %q", got, want)
+	}
+}
+
+func TestRuleConstructorRejectsUnsupportedAttrShapes(t *testing.T) {
 	root := t.TempDir()
 	writePolicyFile(t, root, "managed.star", `
 gazelle_fold.rule(
-    kind = "filegroup",
-    name = "files",
+    kind = "rust_clippy",
+    name = "clippy",
+    attrs = {"deps": {"bad": "shape"}},
 )
 `)
 	if _, err := loadPolicyFile(root, "", "managed.star"); err == nil {
-		t.Fatal("loadPolicyFile unexpectedly accepted filegroup through gazelle_fold.rule")
-	} else if got, want := err.Error(), `gazelle_fold.rule kind "filegroup" is reserved; use gazelle_fold.filegroup(...)`; got != want {
+		t.Fatal("loadPolicyFile unexpectedly accepted a dict-valued rule attr")
+	} else if got, want := err.Error(), `gazelle_fold.rule.attrs["deps"] must be a bool, string, or list or tuple of strings`; got != want {
 		t.Fatalf("loadPolicyFile error = %q, want %q", got, want)
 	}
 }

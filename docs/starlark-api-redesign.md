@@ -132,8 +132,7 @@ gazelle_fold.param(type, required = False, default = None)
 gazelle_fold.fold(name, params = {}, apply = fn)
 gazelle_fold.rewrite(name, params = {}, apply = fn)
 gazelle_fold.policy(name, params = {}, apply = fn)
-gazelle_fold.rule(kind, name, present = True, bool_attrs = {}, string_list_attrs = {})
-gazelle_fold.filegroup(name, srcs, present = True, public = False)
+gazelle_fold.rule(kind, name, present = True, attrs = {})
 gazelle_fold.export(name, label)
 ```
 
@@ -215,24 +214,25 @@ def apply(ctx):
             kind = "rust_clippy",
             name = "clippy",
             present = deps != [],
-            string_list_attrs = {"deps": deps},
+            attrs = {"deps": deps},
         ),
     ]
 ```
 
-Returned `gazelle_fold.rule(...)` and `gazelle_fold.filegroup(...)` values
-declare one exact managed output's desired presence. The host reconciles
-`present = True` and `present = False`; omission is deliberately a no-op so a
-fold cannot accidentally delete a package rule it never named. `srcs = []` is a
-valid filegroup value, so deletion stays explicit through `present = False`
-rather than hiding behind an empty list. `gazelle_fold.export(...)` is ephemeral:
-it makes a label visible to ancestor folds during this walk but does not mutate a
-BUILD file directly.
+Returned `gazelle_fold.rule(...)` values declare one managed output's desired
+presence regardless of rule kind. The host reconciles `present = True` and
+`present = False`; omission is deliberately a no-op so a fold cannot accidentally
+delete a package rule it never named. `attrs` accepts literal bools, strings, and
+lists or tuples of strings. For example, `filegroup` is just another rule kind
+whose `srcs` live in `attrs`; `srcs = []` is still a valid value, so deletion
+stays explicit through `present = False` rather than hiding behind an empty list.
+`gazelle_fold.export(...)` is ephemeral: it makes a label visible to ancestor
+folds during this walk but does not mutate a BUILD file directly.
 
-The stock `file_rollup` fold now follows the same contract: it returns
-`gazelle_fold.filegroup(...)` outputs for the local and recursive targets, and a
-`gazelle_fold.export(...)` output only when there is a recursive label for
-ancestors to consume.
+The stock `file_rollup` fold now follows the same contract through a small local
+helper: it returns `gazelle_fold.rule(...)` outputs for the local and recursive
+filegroups, and a `gazelle_fold.export(...)` output only when there is a recursive
+label for ancestors to consume.
 
 That declarative boundary is fold-specific on purpose. Folds own a package-level
 desired state, so returning outputs makes the whole package shape visible at

@@ -346,17 +346,12 @@ func (ctx *foldContextValue) applyFoldResult(value starlark.Value) error {
 	for iter.Next(&item) {
 		switch typed := item.(type) {
 		case *managedRuleSpecValue:
-			if err := recordManagedRuleOutput(ctx.active.Name, seenRules, typed.spec.Kind, typed.spec.Name); err != nil {
+			if err := recordManagedRuleOutput(ctx.active.Name, seenRules, typed.spec.Name); err != nil {
 				return err
 			}
 			if err := ctx.applyManagedRule(typed.spec); err != nil {
 				return err
 			}
-		case *managedFilegroupSpecValue:
-			if err := recordManagedRuleOutput(ctx.active.Name, seenRules, "filegroup", typed.spec.Name); err != nil {
-				return err
-			}
-			ctx.applyManagedFilegroup(typed.spec)
 		case *exportSpecValue:
 			if _, exists := seenExports[typed.spec.Name]; exists {
 				return fmt.Errorf("fold %q returned duplicate export %q", ctx.active.Name, typed.spec.Name)
@@ -367,7 +362,7 @@ func (ctx *foldContextValue) applyFoldResult(value starlark.Value) error {
 			}
 		default:
 			return fmt.Errorf(
-				"fold %q returned %s, want gazelle_fold.rule(...), gazelle_fold.filegroup(...), or gazelle_fold.export(...)",
+				"fold %q returned %s, want gazelle_fold.rule(...) or gazelle_fold.export(...)",
 				ctx.active.Name,
 				item.Type(),
 			)
@@ -376,16 +371,23 @@ func (ctx *foldContextValue) applyFoldResult(value starlark.Value) error {
 	return nil
 }
 
-func recordManagedRuleOutput(foldName string, seen map[string]struct{}, kind, name string) error {
-	key := kind + "\x00" + name
-	if _, exists := seen[key]; exists {
-		return fmt.Errorf("fold %q returned duplicate managed rule %s %q", foldName, kind, name)
+func recordManagedRuleOutput(foldName string, seen map[string]struct{}, name string) error {
+	if _, exists := seen[name]; exists {
+		return fmt.Errorf("fold %q returned duplicate managed rule name %q", foldName, name)
 	}
-	seen[key] = struct{}{}
+	seen[name] = struct{}{}
 	return nil
 }
 
 func (ctx *foldContextValue) applyManagedRule(spec managedRuleSpec) error {
+	if spec.Kind == "filegroup" {
+		// filegroups are native Gazelle-owned rules. Route them through the
+		// generation path so Gazelle can merge and delete them with the same
+		// semantics it already applies to its built-in kinds, while folds still
+		// see one uniform declarative rule output.
+		ctx.applyGeneratedRule(spec)
+		return nil
+	}
 	if !spec.Present {
 		removeManagedRule(ctx.args.File, spec.Kind, spec.Name)
 		return nil
@@ -394,8 +396,7 @@ func (ctx *foldContextValue) applyManagedRule(spec managedRuleSpec) error {
 	if err != nil {
 		return err
 	}
-	setSortedBoolAttrs(managed, spec.BoolAttrs)
-	setSortedStringListAttrs(managed, spec.StringListAttrs)
+	setSortedAttrs(managed, spec.Attrs)
 	if ctx.args.File == nil {
 		// New BUILD files do not have an AST to edit yet. Let Gazelle insert the
 		// first managed rule through its normal generation path; later runs will
@@ -405,16 +406,13 @@ func (ctx *foldContextValue) applyManagedRule(spec managedRuleSpec) error {
 	return nil
 }
 
-func (ctx *foldContextValue) applyManagedFilegroup(spec managedFilegroupSpec) {
+func (ctx *foldContextValue) applyGeneratedRule(spec managedRuleSpec) {
 	if !spec.Present {
-		ctx.empty = append(ctx.empty, emptyRule("filegroup", spec.Name))
+		ctx.empty = append(ctx.empty, emptyRule(spec.Kind, spec.Name))
 		return
 	}
-	generated := rule.NewRule("filegroup", spec.Name)
-	generated.SetAttr("srcs", spec.Srcs)
-	if spec.Public && (ctx.args.File == nil || !ctx.args.File.HasDefaultVisibility()) {
-		generated.SetAttr("visibility", []string{"//visibility:public"})
-	}
+	generated := rule.NewRule(spec.Kind, spec.Name)
+	setSortedAttrs(generated, spec.Attrs)
 	ctx.gen = append(ctx.gen, generated)
 }
 
@@ -562,17 +560,16 @@ func stringList(values []string) *starlark.List {
 }
 
 func readStringSequence(name string, value starlark.Value) ([]string, error) {
-	if _, ok := value.(starlark.String); ok {
-		return nil, fmt.Errorf("%s must be a list or tuple of strings", name)
-	}
-	iterable, ok := value.(starlark.Iterable)
-	if !ok {
+	var iterable starlark.Iterable
+	switch typed := value.(type) {
+	case *starlark.List:
+		iterable = typed
+	case starlark.Tuple:
+		iterable = typed
+	default:
 		return nil, fmt.Errorf("%s must be a list or tuple of strings", name)
 	}
 	iter := iterable.Iterate()
-	if iter == nil {
-		return nil, fmt.Errorf("%s must be a list or tuple of strings", name)
-	}
 	defer iter.Done()
 
 	var out []string
@@ -587,7 +584,7 @@ func readStringSequence(name string, value starlark.Value) ([]string, error) {
 	return out, nil
 }
 
-func readBoolDict(api string, value starlark.Value) (map[string]bool, error) {
+func readManagedAttrs(api string, value starlark.Value) (map[string]any, error) {
 	if value == nil || value == starlark.None {
 		return nil, nil
 	}
@@ -595,56 +592,36 @@ func readBoolDict(api string, value starlark.Value) (map[string]bool, error) {
 	if !ok {
 		return nil, fmt.Errorf("%s must be a dict", api)
 	}
-	out := make(map[string]bool, dict.Len())
+	out := make(map[string]any, dict.Len())
 	for _, item := range dict.Items() {
 		key, ok := starlark.AsString(item[0])
 		if !ok {
 			return nil, fmt.Errorf("%s keys must be strings", api)
 		}
-		boolean, ok := item[1].(starlark.Bool)
-		if !ok {
-			return nil, fmt.Errorf("%s[%q] must be a bool", api, key)
-		}
-		out[key] = bool(boolean)
-	}
-	return out, nil
-}
-
-func readStringListDict(api string, value starlark.Value) (map[string][]string, error) {
-	if value == nil || value == starlark.None {
-		return nil, nil
-	}
-	dict, ok := value.(*starlark.Dict)
-	if !ok {
-		return nil, fmt.Errorf("%s must be a dict", api)
-	}
-	out := make(map[string][]string, dict.Len())
-	for _, item := range dict.Items() {
-		key, ok := starlark.AsString(item[0])
-		if !ok {
-			return nil, fmt.Errorf("%s keys must be strings", api)
-		}
-		values, err := readStringSequence(fmt.Sprintf("%s[%q]", api, key), item[1])
+		parsed, err := readManagedAttrValue(fmt.Sprintf("%s[%q]", api, key), item[1])
 		if err != nil {
 			return nil, err
 		}
-		out[key] = values
+		out[key] = parsed
 	}
 	return out, nil
 }
 
-func setSortedBoolAttrs(r *rule.Rule, attrs map[string]bool) {
-	names := make([]string, 0, len(attrs))
-	for name := range attrs {
-		names = append(names, name)
+func readManagedAttrValue(name string, value starlark.Value) (any, error) {
+	switch typed := value.(type) {
+	case starlark.Bool:
+		return bool(typed), nil
+	case starlark.String:
+		return string(typed), nil
+	case *starlark.List:
+		return readStringSequence(name, typed)
+	case starlark.Tuple:
+		return readStringSequence(name, typed)
 	}
-	sort.Strings(names)
-	for _, name := range names {
-		r.SetAttr(name, attrs[name])
-	}
+	return nil, fmt.Errorf("%s must be a bool, string, or list or tuple of strings", name)
 }
 
-func setSortedStringListAttrs(r *rule.Rule, attrs map[string][]string) {
+func setSortedAttrs(r *rule.Rule, attrs map[string]any) {
 	names := make([]string, 0, len(attrs))
 	for name := range attrs {
 		names = append(names, name)

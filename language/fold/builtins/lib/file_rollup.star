@@ -1,6 +1,20 @@
 """Helpers for file-rollup folds."""
 
 
+# Keep filegroup sugar local to this stock fold so the public host API stays
+# target-agnostic.
+def _filegroup(name, srcs, present = True, public = False):
+    attrs = {"srcs": srcs}
+    if public:
+        attrs["visibility"] = ["//visibility:public"]
+    return gazelle_fold.rule(
+        kind = "filegroup",
+        name = name,
+        present = present,
+        attrs = attrs,
+    )
+
+
 def file_rollup_fold(name, include = None, local_name = None, recursive_name = None):
     def _apply(ctx):
         active_include = ctx.params.get("include", include)
@@ -9,7 +23,7 @@ def file_rollup_fold(name, include = None, local_name = None, recursive_name = N
 
         local_files = ctx.matching_files(include = active_include)
         outputs = [
-            gazelle_fold.filegroup(
+            _filegroup(
                 name = active_local_name,
                 srcs = local_files,
                 present = local_files != [],
@@ -26,7 +40,7 @@ def file_rollup_fold(name, include = None, local_name = None, recursive_name = N
         recursive_srcs.extend(children.labels)
 
         outputs.append(
-            gazelle_fold.filegroup(
+            _filegroup(
                 name = active_recursive_name,
                 srcs = recursive_srcs,
                 public = True,

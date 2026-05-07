@@ -234,8 +234,7 @@ gazelle_fold.param(type, required = False, default = None)
 gazelle_fold.fold(name, params = {}, apply = fn)
 gazelle_fold.rewrite(name, params = {}, apply = fn)
 gazelle_fold.policy(name, params = {}, apply = fn)
-gazelle_fold.rule(kind, name, present = True, bool_attrs = {}, string_list_attrs = {})
-gazelle_fold.filegroup(name, srcs, present = True, public = False)
+gazelle_fold.rule(kind, name, present = True, attrs = {})
 gazelle_fold.export(name, label)
 ```
 
@@ -261,13 +260,15 @@ ctx.child_exports(name)
 ctx.report_violation(message)  # policies only
 ```
 
-Fold callbacks return package outputs such as `gazelle_fold.rule(...)`,
-`gazelle_fold.filegroup(...)`, and `gazelle_fold.export(...)`. Managed rules
-and filegroups declare whether they should be present, so the host owns the
-ensure/remove machinery and fold authors describe the final BUILD shape instead
-of scripting mutations. Omitting a managed output is a no-op; explicit absence
-keeps deletion ownership local and prevents a fold from silently claiming
-unrelated package rules.
+Fold callbacks return package outputs such as `gazelle_fold.rule(...)` and
+`gazelle_fold.export(...)`. `rule(...)` covers every emitted target kind,
+including native kinds such as `filegroup`, so folds describe one target shape
+instead of choosing between target-specific constructors. `attrs` accepts literal
+bools, strings, and lists or tuples of strings. Managed rules declare whether
+they should be present, so the host owns the ensure/remove machinery and fold
+authors describe the final BUILD shape instead of scripting mutations. Omitting a
+managed output is a no-op; explicit absence keeps deletion ownership local and
+prevents a fold from silently claiming unrelated package rules.
 
 `params` is a real definition contract: unknown names, missing required params,
 and wrong types are rejected instead of silently falling through.
