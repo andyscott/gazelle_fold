@@ -13,9 +13,6 @@ go_library(
     ],
     embedsrcs = [
         "builtins/lib/filegroup.star",
-        "builtins/lib/file_rollup.star",
-        "builtins/lib/forbidden_deps.star",
-        "builtins/lib/required_tags.star",
         "builtins/folds/file_rollup.star",
         "builtins/policies/forbidden_deps.star",
         "builtins/rewrites/required_tags.star",

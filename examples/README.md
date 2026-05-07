@@ -13,10 +13,6 @@ users can import the built-in stock definitions directly:
 # gazelle:fold use("forbidden_deps", scope = "app/...", kinds = ["rust_library"], deny = ["//legacy/..."])
 ```
 
-`definitions.star` shows the next step up: a repo-owned entrypoint that loads the
-built-in helper library and registers opinionated local fold, rewrite, and
-policy names.
-
 `file_rollup` is the most fold-shaped example: each package contributes local
 files, ancestors combine child exports, and a full walk can build a recursive
 target back toward the root.

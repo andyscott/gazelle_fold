@@ -178,35 +178,10 @@ std:rewrites/required_tags.star
 std:policies/forbidden_deps.star
 ```
 
-If you want repo-specific names or defaults, load the bundled helper library
-from your own `.star` entrypoint:
-
-```python
-load("std:lib/file_rollup.star", "file_rollup_fold")
-load("std:lib/filegroup.star", "filegroup")
-load("std:lib/forbidden_deps.star", "forbidden_deps_policy")
-load("std:lib/required_tags.star", "required_tags_rewrite")
-
-required_tags_rewrite(
-    name = "rust_required_tags",
-    kinds = ["rust_library", "rust_binary", "rust_test"],
-)
-
-file_rollup_fold(
-    name = "rust_files",
-    local_name = "all_sources",
-    recursive_name = "all_sources_recursive",
-    include = ["*.rs", "BUILD.bazel"],
-)
-
-forbidden_deps_policy(
-    name = "rust_forbidden_deps",
-    kinds = ["rust_library", "rust_binary", "rust_test"],
-    deny = ["//legacy/..."],
-)
-```
-
-For a small package-local synthesized target, the helper can be used directly:
+For custom behavior, write an ordinary repo-owned `.star` module against the
+host API. The bundled library intentionally keeps only small output helpers
+whose call sites stay clearer than the raw rule form. For example, a
+package-local filegroup fold can use:
 
 ```python
 load("std:lib/filegroup.star", "filegroup")
@@ -231,8 +206,7 @@ Then import the repo-owned entrypoint:
 
 ```python
 # gazelle:fold import("root:build/gazelle_fold/rust.star")
-# gazelle:fold use("rust_required_tags", scope = "...", tags = ["team:runtime"])
-# gazelle:fold use("rust_files", scope = "...")
+# gazelle:fold use("markdown_docs", scope = "...")
 ```
 
 Supported scopes are `"."`, `"..."`, `"bar"`, and `"bar/..."`; they are

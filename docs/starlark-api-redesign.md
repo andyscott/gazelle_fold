@@ -22,7 +22,7 @@ BUILD directives       activate named definitions by package scope
 std:folds/*            ready-made folds users can import directly
 std:rewrites/*         ready-made rewrites users can import directly
 std:policies/*         ready-made policies users can import directly
-std:lib/*              helper factories for repo-owned modules
+std:lib/*              tiny output helpers that stay clearer than raw rule calls
 gazelle_fold host      a tiny safe runtime for custom folds, rewrites, and policies
 ```
 
@@ -84,37 +84,12 @@ These register generic definition names driven entirely by `use(...)` params.
 ### Loadable helper library
 
 ```python
-load("std:lib/required_tags.star", "required_tags_rewrite")
 load("std:lib/filegroup.star", "filegroup")
-load("std:lib/file_rollup.star", "file_rollup_fold")
-load("std:lib/forbidden_deps.star", "forbidden_deps_policy")
 ```
 
-These let a repo define opinionated names and defaults without vendoring helper
-code:
-
-```python
-required_tags_rewrite(
-    name = "rust_required_tags",
-    kinds = ["rust_library", "rust_binary", "rust_test"],
-)
-
-file_rollup_fold(
-    name = "rust_files",
-    include = ["*.rs", "BUILD.bazel"],
-    local_name = "all_sources",
-    recursive_name = "all_sources_recursive",
-)
-
-forbidden_deps_policy(
-    name = "rust_forbidden_deps",
-    kinds = ["rust_library", "rust_binary", "rust_test"],
-    deny = ["//legacy/..."],
-)
-```
-
-For the lightest-weight package-local synthesis, load the filegroup helper
-directly:
+Custom folds, rewrites, and policies are ordinary repo-owned `.star` modules.
+The stdlib keeps only tiny helpers whose call sites stay clearer than raw host
+calls. For package-local filegroup synthesis:
 
 ```python
 load("std:lib/filegroup.star", "filegroup")
@@ -289,41 +264,10 @@ untouched instead of rebuilding them from partial knowledge.
 ### Starlark library
 
 - stock fold, rewrite, and policy entrypoints
-- reusable definition families
-- parameter defaults and small compositions
-- later helpers such as `mirror_attr_rewrite(...)`
+- tiny output helpers where they remove real call-site noise
+- later helpers only when they earn their keep through repeated use
 
-## The current helpers
-
-### `required_tags_rewrite(...)`
-
-```python
-def required_tags_rewrite(name, kinds = None, tags = []):
-    def _apply(ctx, rule):
-        active_kinds = ctx.params["kinds"] if kinds == None else kinds
-        if not rule.matches_kind(active_kinds):
-            return
-        rule.ensure_list_attr_contains(
-            name = "tags",
-            values = ctx.params.get("tags", tags),
-        )
-```
-
-When `kinds` is omitted, the helper declares it as a required activation param.
-When `kinds` is supplied, it becomes an opinionated helper with fewer required
-call-site arguments.
-
-### `file_rollup_fold(...)`
-
-```python
-def file_rollup_fold(name, include = None, local_name = None, recursive_name = None):
-    ...
-```
-
-The stock fold leaves all three fields to `use(...)`. Repo-owned helper calls
-can bake them in as defaults. It is also the clearest example of the fold shape:
-local files become package exports, parent packages combine child exports with
-their own local state, and the recursive target climbs toward the root.
+## The current helper
 
 ### `filegroup(...)`
 
@@ -337,20 +281,6 @@ special host concept. It keeps the runtime target-agnostic while giving common
 file-based folds a compact call site. `present = False` expresses deletion
 explicitly, and `visibility` forwards literal BUILD visibility labels when the
 generated target needs them.
-
-### `forbidden_deps_policy(...)`
-
-```python
-def forbidden_deps_policy(name, kinds = None, deny = None):
-    ...
-```
-
-This reports direct dependency labels from literal `deps` lists and fails the
-Gazelle run before files are written. `deny` accepts absolute label patterns such
-as `//legacy:old` and package-subtree patterns such as `//legacy/...`. The host
-normalizes relative deps before matching so `:old` inside package `legacy` is
-covered by `//legacy/...`. Non-literal `deps` expressions fail closed because the
-host cannot validate them safely.
 
 ## Why `mirror_attr` should still be separate
 
