@@ -11,3 +11,9 @@ gazelle_generation_test(
     gazelle_binary = "//:gazelle_fold",
     test_data = glob(["rust_clippy/**"]),
 )
+
+gazelle_generation_test(
+    name = "deps_policy",
+    gazelle_binary = "//:gazelle_fold",
+    test_data = glob(["deps_policy/**"]),
+)

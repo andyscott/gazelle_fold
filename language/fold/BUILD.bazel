@@ -4,6 +4,7 @@ go_library(
     name = "fold",
     srcs = [
         "builtin_modules.go",
+        "deps.go",
         "directives.go",
         "lang.go",
         "runtime.go",

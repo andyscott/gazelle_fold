@@ -1,0 +1,2 @@
+gazelle: %WORKSPACEPATH%/BUILD.bazel: policy "literal_forbidden_deps" on rust_library "bad_opaque_helper": forbidden literal deps: @cargo//:hidden
+gazelle: gazelle_fold: 1 policy violation(s)

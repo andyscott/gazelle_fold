@@ -164,22 +164,35 @@ func TestLoadDefinitionFileSupportsBuiltinForbiddenDepsPolicy(t *testing.T) {
 	}
 }
 
-func TestRuleValueExposesValidationOnlyDepsAPI(t *testing.T) {
+func TestRuleValueExposesDepsPolicyAPI(t *testing.T) {
 	value := &ruleValue{}
 	if got, want := value.AttrNames(), []string{
 		"name",
 		"matches_kind",
 		"ensure_list_attr_contains",
-		"deps_matching",
+		"deps",
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rule attrs = %#v, want %#v", got, want)
 	}
-	attr, err := value.Attr("remove_deps_matching")
+	for _, name := range []string{"deps_matching", "deps_label_literals_matching"} {
+		attr, err := value.Attr(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if attr != nil {
+			t.Fatalf("%s attr = %#v, want nil", name, attr)
+		}
+	}
+	depsAttr, err := value.Attr("deps")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if attr != nil {
-		t.Fatalf("remove_deps_matching attr = %#v, want nil", attr)
+	if depsAttr == nil {
+		t.Fatal("deps attr = nil, want dependency inspector")
+	}
+	deps := depsAttr.(*depsValue)
+	if got, want := deps.AttrNames(), []string{"labels_matching", "label_literals_matching"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("deps attrs = %#v, want %#v", got, want)
 	}
 }
 
@@ -637,6 +650,286 @@ rust_library(name = "fix")
 	}
 }
 
+func TestPoliciesDoNotRunDuringRewritePhase(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "pkg", []byte(`
+rust_library(name = "lib")
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	writeDefinitionFile(t, root, "policy.star", `
+def _apply(ctx, rule):
+    rule.ensure_list_attr_contains(name = "tags", values = ["policy-ran"])
+
+gazelle_fold.policy(
+    name = "mutation_policy",
+    apply = _apply,
+)
+`)
+	definitions, err := loadDefinitionFile(root, "", "policy.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := newFoldConfig()
+	cfg.Definitions = definitions
+	scope, _ := parseScope("...")
+	cfg.addActivation("mutation_policy", "", scope, nil)
+	c := config.New()
+	c.Exts[configKey] = cfg
+
+	lang := NewLanguage().(*foldLang)
+	lang.Fix(c, f)
+	if got := f.Rules[0].AttrStrings("tags"); got != nil {
+		t.Fatalf("policy ran during Fix and mutated tags = %v, want nil", got)
+	}
+}
+
+func TestDepsLabelLiteralsMatchingFindsEvidenceInsideMixedExpression(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "app", []byte(`
+rust_library(
+    name = "lib",
+    deps = (
+        [
+            ":local",
+            "@cargo//:serde",
+        ] + all_crate_deps(cargo_only = True) + select({
+            "//conditions:default": [],
+            "//conditions:wasm": ["@cargo//:wasm-bindgen"],
+        }, no_match_error = "@cargo//:message")
+    ),
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := depsLabelLiteralsMatching(f.Rules[0], "app", []string{"@cargo//..."}, []string{"all_crate_deps"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"@cargo//:serde", "@cargo//:wasm-bindgen"}; !reflect.DeepEqual(got.matches, want) {
+		t.Fatalf("literal label matches = %#v, want %#v", got.matches, want)
+	}
+	if !got.complete {
+		t.Fatalf("literal label scan complete = false, want true because all_crate_deps is an allowed call")
+	}
+}
+
+func TestDepsLabelsMatchingSupportsRootSubtreeAndExternalExactPatterns(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "app", []byte(`
+rust_library(
+    name = "lib",
+    deps = [
+        ":local",
+        "//other:dep",
+        "@cargo//:serde",
+        "@cargo//:tokio",
+    ],
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ruleValue := &ruleValue{
+		pkg:  "app",
+		rule: f.Rules[0],
+	}
+	depsAttr, err := ruleValue.Attr("deps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	labelsMatching, err := depsAttr.(*depsValue).Attr("labels_matching")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := starlark.Call(
+		&starlark.Thread{Name: "test deps labels_matching"},
+		labelsMatching.(starlark.Callable),
+		nil,
+		[]starlark.Tuple{{
+			starlark.String("patterns"),
+			stringList([]string{"//...", "@cargo//:serde"}),
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels, err := readStringSequence("labels_matching result", got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{":local", "//other:dep", "@cargo//:serde"}; !reflect.DeepEqual(labels, want) {
+		t.Fatalf("labels_matching = %#v, want %#v", labels, want)
+	}
+}
+
+func TestDepPatternCacheReusesParsedPatternsByValue(t *testing.T) {
+	cache := newDepPatternCache()
+	raw := []string{"//legacy/...", "@cargo//:serde"}
+
+	first, err := cache.parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := cache.parse(append([]string(nil), raw...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first[0].subtree != second[0].subtree || first[1].exact != second[1].exact {
+		t.Fatalf("cached patterns were parsed again: first = %#v, second = %#v", first, second)
+	}
+
+	_, firstErr := cache.parse([]string{":relative_pattern_is_invalid"})
+	_, secondErr := cache.parse([]string{":relative_pattern_is_invalid"})
+	if firstErr == nil || secondErr == nil {
+		t.Fatalf("invalid pattern errors = %v, %v; want both non-nil", firstErr, secondErr)
+	}
+	if firstErr != secondErr {
+		t.Fatalf("invalid pattern error was not reused: first = %v, second = %v", firstErr, secondErr)
+	}
+}
+
+func TestDepsMatchingFailsClosedForInvalidLiteralLabels(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "app", []byte(`
+rust_library(
+    name = "lib",
+    deps = [":"],
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	matches, supported, err := depsMatching(f.Rules[0], "app", []string{"//..."}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if supported {
+		t.Fatalf("depsMatching supported = true, want false")
+	}
+	if matches != nil {
+		t.Fatalf("depsMatching matches = %#v, want nil for unsupported deps", matches)
+	}
+}
+
+func TestDepsLabelLiteralsMatchingFindsEvidenceInsideOpaqueCalls(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "app", []byte(`
+rust_library(
+    name = "lib",
+    deps = custom_deps(
+        "@cargo//:hidden",
+        extra = {
+            "label": ["@cargo//:extra"],
+        },
+    ) + SOME_DEPS,
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := depsLabelLiteralsMatching(f.Rules[0], "app", []string{"@cargo//..."}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"@cargo//:hidden", "@cargo//:extra"}; !reflect.DeepEqual(got.matches, want) {
+		t.Fatalf("literal label matches = %#v, want %#v", got.matches, want)
+	}
+	if got.complete {
+		t.Fatalf("literal label scan complete = true, want false because custom_deps and SOME_DEPS are opaque")
+	}
+}
+
+func TestDepsLabelLiteralsMatchingDoesNotTreatAnonymousCallsAsAllowed(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "app", []byte(`
+rust_library(
+    name = "lib",
+    deps = helpers.deps("@cargo//:serde"),
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := depsLabelLiteralsMatching(f.Rules[0], "app", []string{"@cargo//..."}, []string{""}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"@cargo//:serde"}; !reflect.DeepEqual(got.matches, want) {
+		t.Fatalf("literal label matches = %#v, want %#v", got.matches, want)
+	}
+	if got.complete {
+		t.Fatalf("literal label scan complete = true, want false because dotted calls are not allow-listed by an empty name")
+	}
+}
+
+func TestPolicyCanRejectDepsLabelLiteralsInsideMixedExpressions(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "app", []byte(`
+rust_library(
+    name = "lib",
+    deps = [
+        ":local",
+        "@cargo//:serde",
+    ] + all_crate_deps(cargo_only = True),
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	writeDefinitionFile(t, root, "policy.star", `
+def _apply(ctx, rule):
+    if not rule.matches_kind(ctx.params["kinds"]):
+        return
+    scan = rule.deps.label_literals_matching(
+        patterns = ctx.params["deny"],
+        allowed_calls = ["all_crate_deps"],
+    )
+    if scan.matches:
+        ctx.report_violation("forbidden literal deps: " + ", ".join(scan.matches))
+
+gazelle_fold.policy(
+    name = "literal_forbidden_deps",
+    params = {
+        "deny": gazelle_fold.param(type = "strings", required = True),
+        "kinds": gazelle_fold.param(type = "strings", required = True),
+    },
+    apply = _apply,
+)
+`)
+	definitions, err := loadDefinitionFile(root, "", "policy.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := newFoldConfig()
+	cfg.Definitions = definitions
+	scope, _ := parseScope("...")
+	cfg.addActivation("literal_forbidden_deps", "", scope, map[string]any{
+		"kinds": []string{"rust_library"},
+		"deny":  []string{"@cargo//..."},
+	})
+	c := config.New()
+	c.Exts[configKey] = cfg
+
+	lang := NewLanguage().(*foldLang)
+	lang.Fix(c, f)
+	violations := lang.collectRulePolicyViolations()
+	if got, want := violations, []policyViolation{{
+		File:       "BUILD.bazel",
+		PolicyName: "literal_forbidden_deps",
+		RuleKind:   "rust_library",
+		RuleName:   "lib",
+		Message:    "forbidden literal deps: @cargo//:serde",
+	}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("violations = %#v, want %#v", got, want)
+	}
+}
+
 func TestForbiddenDepsReportsExactAndSubtreeMatches(t *testing.T) {
 	f, err := rule.LoadData("BUILD.bazel", "legacy", []byte(`
 rust_library(
@@ -681,6 +974,46 @@ rust_library(
 	}
 	if got := f.Rules[0].AttrStrings("deps"); len(got) != 3 {
 		t.Fatalf("deps after policy = %v, want original deps preserved", got)
+	}
+}
+
+func TestPolicyExecutionErrorsFailClosed(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "app", []byte(`
+rust_library(
+    name = "lib",
+    deps = ["//safe:ok"],
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	definitions, err := loadDefinitionFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := newFoldConfig()
+	cfg.Definitions = definitions
+	scope, _ := parseScope("...")
+	cfg.addActivation("forbidden_deps", "", scope, map[string]any{
+		"kinds": []string{"rust_library"},
+		"deny":  []string{":relative_pattern_is_invalid"},
+	})
+	c := config.New()
+	c.Exts[configKey] = cfg
+
+	lang := NewLanguage().(*foldLang)
+	lang.Fix(c, f)
+	violations := lang.collectRulePolicyViolations()
+	if got, want := violations, []policyViolation{{
+		File:       "BUILD.bazel",
+		PolicyName: "forbidden_deps",
+		RuleKind:   "rust_library",
+		RuleName:   "lib",
+		Message:    `policy error: invalid dependency label pattern ":relative_pattern_is_invalid"`,
+	}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("violations = %#v, want %#v", got, want)
 	}
 }
 
@@ -761,7 +1094,47 @@ rust_library(
 		PolicyName: "forbidden_deps",
 		RuleKind:   "rust_library",
 		RuleName:   "lib",
-		Message:    "cannot validate forbidden deps because deps is not a literal string list",
+		Message:    "cannot validate forbidden deps because deps is not a valid literal label list",
+	}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("violations = %#v, want %#v", got, want)
+	}
+}
+
+func TestForbiddenDepsFailsClosedForInvalidLiteralLabels(t *testing.T) {
+	f, err := rule.LoadData("BUILD.bazel", "app", []byte(`
+rust_library(
+    name = "lib",
+    deps = [":"],
+)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	definitions, err := loadDefinitionFile(t.TempDir(), "", "std:policies/forbidden_deps.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := newFoldConfig()
+	cfg.Definitions = definitions
+	scope, _ := parseScope("...")
+	cfg.addActivation("forbidden_deps", "", scope, map[string]any{
+		"kinds": []string{"rust_library"},
+		"deny":  []string{"//legacy/..."},
+	})
+	c := config.New()
+	c.Exts[configKey] = cfg
+
+	lang := NewLanguage().(*foldLang)
+	lang.Fix(c, f)
+	violations := lang.collectRulePolicyViolations()
+	if got, want := violations, []policyViolation{{
+		File:       "BUILD.bazel",
+		PolicyName: "forbidden_deps",
+		RuleKind:   "rust_library",
+		RuleName:   "lib",
+		Message:    "cannot validate forbidden deps because deps is not a valid literal label list",
 	}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("violations = %#v, want %#v", got, want)
 	}
