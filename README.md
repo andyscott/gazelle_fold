@@ -154,6 +154,11 @@ For a package-local rule synthesis example, see
 [`examples/rust_clippy`](examples/rust_clippy). It keeps one managed Clippy
 target per Rust package from a single root activation.
 
+For a custom dependency policy example, see
+[`examples/deps_policy`](examples/deps_policy). It shows `rule.deps` policies
+that distinguish validated dependency lists from source-level label evidence in
+mixed `deps` expressions.
+
 ## Module paths
 
 Modules resolve through a small mount table:
@@ -217,7 +222,7 @@ the run.
 rule.name
 rule.matches_kind(patterns)
 rule.ensure_list_attr_contains(name, values)
-rule.deps_matching(patterns)
+rule.deps
 
 ctx.params
 ctx.matching_files(include)
@@ -239,6 +244,28 @@ prevents a fold from silently claiming unrelated package rules.
 `params` is a real definition contract: unknown names, missing required params,
 and wrong types are rejected instead of silently falling through.
 
+`rule.deps` returns the dependency inspector for one rule:
+
+```text
+rule.deps.labels_matching(patterns)
+rule.deps.label_literals_matching(patterns, allowed_calls = [])
+```
+
+`labels_matching(patterns)` is the validation API for dependency policies. It
+returns matching labels from a valid literal `deps` label list, or `None` when
+the `deps` expression cannot be validated safely.
+
+`label_literals_matching(patterns, allowed_calls = [])` is a source-evidence API
+for policies that need to find labels handwritten inside a larger `deps`
+expression. It returns an object with `matches` and `complete` fields. `matches`
+contains literal labels that matched the provided patterns, even when the
+surrounding expression also includes opaque helpers or variables. `complete` is
+false when some part of the expression was not understood, so an empty `matches`
+list means "no matching literal evidence was found", not "the dependency list is
+clean". Calls named in `allowed_calls` are treated as supported opaque leaves
+after their literal arguments are still scanned for evidence. Use
+`labels_matching` when a policy must validate a literal dependency list itself.
+
 ## Current limits
 
 - Directive comments use a tiny one-command language, not general Starlark.
@@ -251,7 +278,14 @@ and wrong types are rejected instead of silently falling through.
 - `forbidden_deps` reports direct labels from literal `deps` lists and fails the
   Gazelle run before files are written. Patterns are absolute Bazel labels such
   as `//legacy:old` or subtree selectors such as `//legacy/...`; non-literal
-  `deps` expressions fail closed because they cannot be validated safely.
+  `deps` expressions and invalid label strings fail closed because they cannot
+  be validated safely.
+- `rule.deps.label_literals_matching(...)` is deliberately weaker than full Starlark
+  evaluation: it scans source syntax for label string literals in lists, tuples,
+  dicts, `+` concatenations, `select(...)` branch values, and call arguments,
+  and marks the scan incomplete when it sees calls, variables, comprehensions,
+  or other opaque expressions it cannot evaluate. Policy authors can mark
+  project-owned helper calls as allowed opaque leaves with `allowed_calls`.
 - Recursive rollups are deliberately conservative: if a selective Gazelle run
   has not covered every relevant child package, ancestor recursive outputs are
   left untouched instead of being rewritten from partial knowledge.

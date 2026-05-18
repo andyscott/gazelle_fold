@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/bazelbuild/bazel-gazelle/config"
-	"github.com/bazelbuild/bazel-gazelle/label"
 	"github.com/bazelbuild/bazel-gazelle/language"
 	"github.com/bazelbuild/bazel-gazelle/rule"
 	"github.com/bmatcuk/doublestar/v4"
@@ -91,20 +90,20 @@ func (l *foldLang) Fix(c *config.Config, f *rule.File) {
 	cfg := currentConfig(c)
 	rewrites := effectiveRuleDefinitions(cfg, f.Pkg, kindRuleRewrite)
 	policies := effectiveRuleDefinitions(cfg, f.Pkg, kindRulePolicy)
-	for _, active := range append(append([]effectiveDefinition(nil), rewrites...), policies...) {
+	for _, active := range rewrites {
+		depPatterns := newDepPatternCache()
 		for _, r := range f.Rules {
 			if ruleIsSkipped(r, active.Activation.Name) {
 				continue
 			}
-			if err := runRuleDefinition(active, f.Pkg, f.Path, r, nil); err != nil {
+			if err := runRuleDefinition(active, f.Pkg, f.Path, r, depPatterns, nil); err != nil {
 				log.Printf("%s: %s %q on %s %q: %v", f.Path, active.Definition.Kind, active.Activation.Name, r.Kind(), r.Name(), err)
 			}
 		}
 	}
 	if len(policies) > 0 {
 		// Gazelle resolves generated deps after Fix. Keep the final file and
-		// re-run policies after that merge so they describe the BUILD file we
-		// emit, not only the pre-generation snapshot we first saw.
+		// run policies after that merge so they describe the BUILD file we emit.
 		l.policyRuns = append(l.policyRuns, rulePolicyRun{
 			file:     f,
 			policies: policies,
@@ -159,12 +158,19 @@ func (l *foldLang) collectRulePolicyViolations() []policyViolation {
 	l.violations = nil
 	for _, run := range l.policyRuns {
 		for _, active := range run.policies {
+			depPatterns := newDepPatternCache()
 			for _, r := range run.file.Rules {
 				if ruleIsSkipped(r, active.Activation.Name) {
 					continue
 				}
-				if err := runRuleDefinition(active, run.file.Pkg, run.file.Path, r, l.recordViolation); err != nil {
-					log.Printf("%s: policy %q on %s %q: %v", run.file.Path, active.Activation.Name, r.Kind(), r.Name(), err)
+				if err := runRuleDefinition(active, run.file.Pkg, run.file.Path, r, depPatterns, l.recordViolation); err != nil {
+					l.recordViolation(policyViolation{
+						File:       run.file.Path,
+						PolicyName: active.Activation.Name,
+						RuleKind:   r.Kind(),
+						RuleName:   r.Name(),
+						Message:    "policy error: " + err.Error(),
+					})
 				}
 			}
 		}
@@ -410,86 +416,6 @@ func ensureListAttrContains(file string, r *rule.Rule, attr string, required []s
 	if len(updated) != len(current) {
 		r.SetAttr(attr, updated)
 	}
-}
-
-type depPattern struct {
-	exact   *label.Label
-	subtree *label.Label
-}
-
-func parseDepPatterns(rawPatterns []string) ([]depPattern, error) {
-	out := make([]depPattern, 0, len(rawPatterns))
-	for _, raw := range rawPatterns {
-		pattern, err := parseDepPattern(raw)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, pattern)
-	}
-	return out, nil
-}
-
-func parseDepPattern(raw string) (depPattern, error) {
-	if strings.HasSuffix(raw, "/...") || raw == "//..." || strings.HasSuffix(raw, "//...") {
-		base := raw
-		switch {
-		case raw == "//...":
-			base = "//"
-		case strings.HasSuffix(raw, "//..."):
-			base = strings.TrimSuffix(raw, "...")
-		default:
-			base = strings.TrimSuffix(raw, "/...")
-		}
-		root, err := label.Parse(base + ":__subtree__")
-		if err != nil || root.Relative {
-			return depPattern{}, fmt.Errorf("invalid dependency subtree pattern %q", raw)
-		}
-		return depPattern{subtree: &root}, nil
-	}
-	exact, err := label.Parse(raw)
-	if err != nil || exact.Relative {
-		return depPattern{}, fmt.Errorf("invalid dependency label pattern %q", raw)
-	}
-	return depPattern{exact: &exact}, nil
-}
-
-func depsMatching(file string, r *rule.Rule, pkg string, rawPatterns []string) ([]string, bool, error) {
-	if r.Attr("deps") == nil || len(rawPatterns) == 0 {
-		return nil, true, nil
-	}
-	current, ok := literalStringListAttr(r.Attr("deps"))
-	if !ok {
-		return nil, false, nil
-	}
-	patterns, err := parseDepPatterns(rawPatterns)
-	if err != nil {
-		return nil, true, err
-	}
-
-	var matched []string
-	for _, dep := range current {
-		parsed, err := label.Parse(dep)
-		if err != nil {
-			log.Printf("%s: skipping unparsable dep %q on %s %q: %v", file, dep, r.Kind(), r.Name(), err)
-			continue
-		}
-		if depMatchesAnyPattern(parsed.Abs("", pkg), patterns) {
-			matched = append(matched, dep)
-		}
-	}
-	return matched, true, nil
-}
-
-func depMatchesAnyPattern(dep label.Label, patterns []depPattern) bool {
-	for _, pattern := range patterns {
-		switch {
-		case pattern.exact != nil && pattern.exact.Equal(dep):
-			return true
-		case pattern.subtree != nil && pattern.subtree.Contains(dep):
-			return true
-		}
-	}
-	return false
 }
 
 func matchingFiles(files, patterns []string) []string {

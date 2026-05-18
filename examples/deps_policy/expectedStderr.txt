@@ -1,0 +1,4 @@
+gazelle: %WORKSPACEPATH%/BUILD.bazel: policy "no_handwritten_generated_deps" on rust_library "mixed_deps": handwritten generated deps: @cargo//:serde
+gazelle: %WORKSPACEPATH%/BUILD.bazel: policy "no_handwritten_generated_deps" on rust_library "opaque_deps": cannot fully inspect deps expression for handwritten generated-dep evidence
+gazelle: %WORKSPACEPATH%/BUILD.bazel: policy "no_handwritten_generated_deps" on rust_library "select_deps": handwritten generated deps: @cargo//:wasm-bindgen
+gazelle: gazelle_fold: 3 policy violation(s)

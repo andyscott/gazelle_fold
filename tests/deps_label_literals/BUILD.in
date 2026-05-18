@@ -1,0 +1,20 @@
+# gazelle:fold import("policy.star")
+# gazelle:fold use("literal_forbidden_deps", scope = "...", kinds = ["rust_library"], deny = ["@cargo//..."], allowed_calls = ["all_crate_deps"])
+
+load("@cargo//:defs.bzl", "all_crate_deps")
+
+rust_library(
+    name = "allowed_generated_deps",
+    deps = all_crate_deps(cargo_only = True),
+)
+
+rust_library(
+    name = "bad_opaque_helper",
+    deps = custom_deps("@cargo//:hidden") + SOME_DEPS,
+)
+
+# gazelle:fold skip("literal_forbidden_deps", reason = "fixture documents explicit skip")
+rust_library(
+    name = "skipped_literal",
+    deps = ["@cargo//:allowed_for_fixture"],
+)

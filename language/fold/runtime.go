@@ -11,7 +11,7 @@ import (
 	"go.starlark.net/starlark"
 )
 
-func runRuleDefinition(active effectiveDefinition, rel, file string, r *rule.Rule, reportViolation func(policyViolation)) error {
+func runRuleDefinition(active effectiveDefinition, rel, file string, r *rule.Rule, depPatterns *depPatternCache, reportViolation func(policyViolation)) error {
 	params, err := active.normalizedParams()
 	if err != nil {
 		return err
@@ -30,9 +30,10 @@ func runRuleDefinition(active effectiveDefinition, rel, file string, r *rule.Rul
 				reportViolation: reportViolation,
 			},
 			&ruleValue{
-				file: file,
-				pkg:  rel,
-				rule: r,
+				file:        file,
+				pkg:         rel,
+				rule:        r,
+				depPatterns: depPatterns,
 			},
 		},
 		nil,
@@ -93,9 +94,10 @@ func (ctx *ruleContextValue) AttrNames() []string {
 }
 
 type ruleValue struct {
-	file string
-	pkg  string
-	rule *rule.Rule
+	file        string
+	pkg         string
+	rule        *rule.Rule
+	depPatterns *depPatternCache
 }
 
 func (*ruleValue) String() string        { return "rule" }
@@ -112,15 +114,19 @@ func (r *ruleValue) Attr(name string) (starlark.Value, error) {
 		return ruleMatchesKind.BindReceiver(r), nil
 	case "ensure_list_attr_contains":
 		return ruleEnsureListAttrContains.BindReceiver(r), nil
-	case "deps_matching":
-		return ruleDepsMatching.BindReceiver(r), nil
+	case "deps":
+		return &depsValue{
+			pkg:         r.pkg,
+			rule:        r.rule,
+			depPatterns: r.depPatterns,
+		}, nil
 	default:
 		return nil, nil
 	}
 }
 
 func (*ruleValue) AttrNames() []string {
-	return []string{"name", "matches_kind", "ensure_list_attr_contains", "deps_matching"}
+	return []string{"name", "matches_kind", "ensure_list_attr_contains", "deps"}
 }
 
 var ruleContextReportViolation = starlark.NewBuiltin("report_violation", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -177,35 +183,16 @@ var ruleEnsureListAttrContains = starlark.NewBuiltin("ensure_list_attr_contains"
 	return starlark.None, nil
 })
 
-var ruleDepsMatching = starlark.NewBuiltin("deps_matching", func(_ *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	self := fn.Receiver().(*ruleValue)
-	var patterns starlark.Value
-	if err := starlark.UnpackArgs("deps_matching", args, kwargs, "patterns", &patterns); err != nil {
-		return nil, err
-	}
-	values, err := readStringSequence("deps_matching.patterns", patterns)
-	if err != nil {
-		return nil, err
-	}
-	matched, supported, err := depsMatching(self.file, self.rule, self.pkg, values)
-	if err != nil {
-		return nil, err
-	}
-	if !supported {
-		return starlark.None, nil
-	}
-	return stringList(matched), nil
-})
-
 type foldContextValue struct {
-	lang     *foldLang
-	args     language.GenerateArgs
-	active   activation
-	params   *starlark.Dict
-	gen      []*rule.Rule
-	empty    []*rule.Rule
-	exports  map[string]string
-	complete bool
+	lang        *foldLang
+	args        language.GenerateArgs
+	active      activation
+	params      *starlark.Dict
+	depPatterns *depPatternCache
+	gen         []*rule.Rule
+	empty       []*rule.Rule
+	exports     map[string]string
+	complete    bool
 }
 
 func newFoldContextValue(lang *foldLang, args language.GenerateArgs, active effectiveDefinition) (*foldContextValue, error) {
@@ -214,12 +201,13 @@ func newFoldContextValue(lang *foldLang, args language.GenerateArgs, active effe
 		return nil, err
 	}
 	return &foldContextValue{
-		lang:     lang,
-		args:     args,
-		active:   active.Activation,
-		params:   params,
-		exports:  make(map[string]string),
-		complete: true,
+		lang:        lang,
+		args:        args,
+		active:      active.Activation,
+		params:      params,
+		depPatterns: newDepPatternCache(),
+		exports:     make(map[string]string),
+		complete:    true,
 	}, nil
 }
 
@@ -287,9 +275,10 @@ var packageRulesMatching = starlark.NewBuiltin("rules_matching", func(_ *starlar
 			continue
 		}
 		rules = append(rules, &ruleValue{
-			file: self.args.File.Path,
-			pkg:  self.args.Rel,
-			rule: r,
+			file:        self.args.File.Path,
+			pkg:         self.args.Rel,
+			rule:        r,
+			depPatterns: self.depPatterns,
 		})
 	}
 	return starlark.NewList(rules), nil

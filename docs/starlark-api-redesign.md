@@ -133,12 +133,22 @@ ctx.params
 rule.name
 rule.matches_kind(patterns)
 rule.ensure_list_attr_contains(name, values)
-rule.deps_matching(patterns)
+rule.deps
 ```
 
 Matching is intentionally an activation-time concern, not a registration-time
 constraint. That is what lets stock definitions be imported directly and configured
 through `use(...)`.
+
+`rule.deps` returns a dependency inspector. `labels_matching(...)` validates
+literal `deps` label lists and returns `None` for unsupported expressions or
+invalid label strings.
+`label_literals_matching(...)` is weaker but more flexible: it scans source
+syntax inside mixed `deps` expressions for handwritten label literals, returns
+`matches` plus a `complete` flag, and lets policy authors mark project-owned
+helper calls as allowed opaque leaves. The inspector keeps dependency-specific
+label semantics out of the generic rule API without exposing arbitrary BUILD AST
+access.
 
 ### Policy callbacks
 

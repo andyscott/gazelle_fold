@@ -4,9 +4,9 @@
 def _apply(ctx, rule):
     if not rule.matches_kind(ctx.params["kinds"]):
         return
-    denied = rule.deps_matching(patterns = ctx.params["deny"])
+    denied = rule.deps.labels_matching(patterns = ctx.params["deny"])
     if denied == None:
-        ctx.report_violation("cannot validate forbidden deps because deps is not a literal string list")
+        ctx.report_violation("cannot validate forbidden deps because deps is not a valid literal label list")
     elif denied:
         ctx.report_violation("forbidden deps: " + ", ".join(denied))
 

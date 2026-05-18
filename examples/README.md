@@ -28,6 +28,11 @@ package stops owning any. That is the right shape when every package needs the
 same local aggregator, but the source of truth should remain the package's own
 rules rather than a parent rollup.
 
+`deps_policy/` is a custom policy example. It uses `rule.deps` to keep
+dependency-specific inspection off the top-level rule API, and shows the
+difference between validating literal deps and scanning mixed deps expressions
+for handwritten label evidence.
+
 For one-off exceptions, keep the reason beside the rule:
 
 ```python
